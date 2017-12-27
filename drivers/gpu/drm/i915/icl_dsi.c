@@ -335,6 +335,45 @@ static void gen11_dsi_program_esc_clk_div(struct intel_encoder *encoder)
 	}
 }
 
+static void gen11_dsi_pll_enable(struct intel_encoder *encoder,
+				 const struct intel_crtc_state *pipe_config)
+{
+	struct drm_crtc *crtc = pipe_config->base.crtc;
+	struct drm_i915_private *dev_priv = to_i915(crtc->dev);
+	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
+	struct intel_shared_dpll *pll = intel_crtc->config->shared_dpll;
+	struct intel_dsi *intel_dsi = enc_to_intel_dsi(&encoder->base);
+	enum intel_dpll_id id = pll->info->id;
+	i915_reg_t enable_reg = icl_pll_id_to_enable_reg(id);
+	enum port port;
+	uint32_t val;
+
+	/**
+	 * Note: Following PLL enable steps are specific to DSI,
+	 * some common steps for all encoder will be done by dpll_enable().
+	 */
+
+	mutex_lock(&dev_priv->dpll_lock);
+
+	for_each_dsi_port(port, intel_dsi->ports) {
+		val = I915_READ(DPCLKA_CFGCR0_ICL);
+		val &= ~DPCLKA_CFGCR0_DDI_CLK_SEL_MASK(port);
+		val |= DPCLKA_CFGCR0_DDI_CLK_SEL(pll->info->id, port);
+		I915_WRITE(DPCLKA_CFGCR0_ICL, val);
+		POSTING_READ(DPCLKA_CFGCR0_ICL);
+	}
+
+	mutex_unlock(&dev_priv->dpll_lock);
+
+	gen11_dsi_program_esc_clk_div(encoder);
+	val = I915_READ(enable_reg);
+	val |= PLL_ENABLE;
+	I915_WRITE(enable_reg, val);
+
+	if (wait_for_us((I915_READ(enable_reg) & PLL_LOCK), 600))
+		DRM_ERROR("PLL %d not locked\n", id);
+}
+
 static void gen11_dsi_enable_io_power(struct intel_encoder *encoder)
 {
 	struct drm_i915_private *dev_priv = to_i915(encoder->base.dev);
@@ -963,7 +1002,7 @@ static void gen11_dsi_pre_enable(struct intel_encoder *encoder,
 	gen11_dsi_enable_io_power(encoder);
 
 	/* step3: enable DSI PLL */
-	gen11_dsi_program_esc_clk_div(encoder);
+	gen11_dsi_pll_enable(encoder, pipe_config);
 
 	/* step4: enable DSI port and DPHY */
 	gen11_dsi_enable_port_and_phy(encoder, pipe_config);
