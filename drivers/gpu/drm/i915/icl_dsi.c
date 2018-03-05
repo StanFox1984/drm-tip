@@ -1145,22 +1145,21 @@ static bool gen11_dsi_get_hw_state(struct intel_encoder *encoder,
 		switch (tmp & TRANS_DDI_EDP_INPUT_MASK) {
 		case TRANS_DDI_EDP_INPUT_A_ON:
 			*pipe = PIPE_A;
-			ret = true;
-			goto out;
+			break;
 		case TRANS_DDI_EDP_INPUT_B_ONOFF:
 			*pipe = PIPE_B;
-			ret = true;
-			goto out;
+			break;
 		case TRANS_DDI_EDP_INPUT_C_ONOFF:
 			*pipe = PIPE_C;
-			ret = true;
+			break;
+		default:
+			DRM_ERROR("Invalid PIPE input\n");
 			goto out;
 		}
 
 		tmp = I915_READ(PIPECONF(dsi_trans));
 		ret = tmp & PIPECONF_ENABLE;
 	}
-
 out:
 	intel_display_power_put(dev_priv, encoder->power_domain);
 	return ret;
