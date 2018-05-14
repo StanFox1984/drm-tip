@@ -22,6 +22,7 @@
  */
 
 #include "intel_drv.h"
+#include "intel_dsi.h"
 
 /**
  * DOC: Display PLLs
@@ -2532,8 +2533,11 @@ static bool icl_calc_dpll_state(struct intel_crtc_state *crtc_state,
 		ret = icl_calc_tbt_pll(dev_priv, clock, &pll_params);
 	else if (intel_crtc_has_type(crtc_state, INTEL_OUTPUT_HDMI))
 		ret = cnl_ddi_calculate_wrpll(clock, dev_priv, &pll_params);
-	else
-		ret = icl_calc_dp_combo_pll(dev_priv, clock, &pll_params);
+	else if (encoder->type == INTEL_OUTPUT_DSI) {
+               struct intel_dsi *intel_dsi = enc_to_intel_dsi(&encoder->base);
+               ret = cnl_ddi_calculate_wrpll(intel_dsi->bitrate_khz/5, dev_priv, &pll_params);
+        } else
+	       ret = icl_calc_dp_combo_pll(dev_priv, clock, &pll_params);
 
 	if (!ret)
 		return false;
