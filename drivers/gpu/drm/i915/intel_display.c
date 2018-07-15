@@ -14179,12 +14179,12 @@ static void intel_setup_outputs(struct drm_i915_private *dev_priv)
 		intel_crt_init(dev_priv);
 
 	if (IS_ICELAKE(dev_priv)) {
-		intel_ddi_init(dev_priv, PORT_A);
-		intel_ddi_init(dev_priv, PORT_B);
-		intel_ddi_init(dev_priv, PORT_C);
-		intel_ddi_init(dev_priv, PORT_D);
-		intel_ddi_init(dev_priv, PORT_E);
-		intel_ddi_init(dev_priv, PORT_F);
+		//intel_ddi_init(dev_priv, PORT_A);
+		//intel_ddi_init(dev_priv, PORT_B);
+		//intel_ddi_init(dev_priv, PORT_C);
+		//intel_ddi_init(dev_priv, PORT_D);
+		//intel_ddi_init(dev_priv, PORT_E);
+		//intel_ddi_init(dev_priv, PORT_F);
 		intel_gen11_dsi_init(dev_priv);
 	} else if (IS_GEN9_LP(dev_priv)) {
 		/*
