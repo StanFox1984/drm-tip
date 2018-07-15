@@ -2930,7 +2930,7 @@ icl_get_dpll(struct intel_crtc *crtc, struct intel_crtc_state *crtc_state,
 	return pll;
 }
 
-static i915_reg_t icl_pll_id_to_enable_reg(enum intel_dpll_id id)
+i915_reg_t icl_pll_id_to_enable_reg(enum intel_dpll_id id)
 {
 	switch (id) {
 	default:

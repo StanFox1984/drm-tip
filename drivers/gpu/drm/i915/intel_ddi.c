@@ -2810,6 +2810,19 @@ static void intel_ddi_clk_select(struct intel_encoder *encoder,
 	mutex_lock(&dev_priv->dpll_lock);
 
 	if (IS_ICELAKE(dev_priv)) {
+               enum intel_dpll_id id = pll->info->id;
+               i915_reg_t enable_reg = icl_pll_id_to_enable_reg(id);
+
+               val = I915_READ(enable_reg);
+               val |= PLL_ENABLE;
+               I915_WRITE(enable_reg, val);
+
+               /* TODO: wait times missing from the spec. */
+               if (intel_wait_for_register(dev_priv, enable_reg, PLL_LOCK,
+                                           PLL_LOCK, 5))
+                       DRM_ERROR("PLL %d not locked\n", id);
+
+
 		if (port >= PORT_C)
 			I915_WRITE(DDI_CLK_SEL(port),
 				   icl_pll_to_ddi_pll_sel(encoder, pll));
