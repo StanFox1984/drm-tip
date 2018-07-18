@@ -5691,8 +5691,8 @@ static void haswell_crtc_enable(struct intel_crtc_state *pipe_config,
 	if (intel_crtc->config->shared_dpll)
 		intel_enable_shared_dpll(intel_crtc);
 
-	if (INTEL_GEN(dev_priv) >= 11)
-		icl_map_plls_to_ports(crtc, pipe_config, old_state);
+	//if (INTEL_GEN(dev_priv) >= 11)
+	//	icl_map_plls_to_ports(crtc, pipe_config, old_state);
 
 	intel_encoders_pre_enable(crtc, pipe_config, old_state);
 
@@ -5896,7 +5896,8 @@ static void haswell_crtc_disable(struct intel_crtc_state *old_crtc_state,
 	intel_encoders_post_disable(crtc, old_crtc_state, old_state);
 
 	if (INTEL_GEN(dev_priv) >= 11)
-		icl_unmap_plls_to_ports(crtc, old_crtc_state, old_state);
+		//icl_unmap_plls_to_ports(crtc, old_crtc_state, old_state);
+		intel_disable_shared_dpll(to_intel_crtc(crtc));
 }
 
 static void i9xx_pfit_enable(struct intel_crtc *crtc)
@@ -9406,7 +9407,8 @@ static bool hsw_get_transcoder_state(struct intel_crtc *crtc,
 	 * XXX: Do intel_display_power_get_if_enabled before reading this (for
 	 * consistency and less surprising code; it's in always on power).
 	 */
-	tmp = I915_READ(TRANS_DDI_FUNC_CTL(TRANSCODER_EDP));
+	//tmp = I915_READ(TRANS_DDI_FUNC_CTL(TRANSCODER_EDP));
+	tmp = I915_READ(TRANS_DDI_FUNC_CTL(TRANSCODER_DSI_0));
 	if (tmp & TRANS_DDI_FUNC_ENABLE) {
 		enum pipe trans_edp_pipe;
 		switch (tmp & TRANS_DDI_EDP_INPUT_MASK) {
@@ -9426,7 +9428,8 @@ static bool hsw_get_transcoder_state(struct intel_crtc *crtc,
 		}
 
 		if (trans_edp_pipe == crtc->pipe)
-			pipe_config->cpu_transcoder = TRANSCODER_EDP;
+			//pipe_config->cpu_transcoder = TRANSCODER_EDP;
+			pipe_config->cpu_transcoder = TRANSCODER_DSI_0;
 	}
 
 	power_domain = POWER_DOMAIN_TRANSCODER(pipe_config->cpu_transcoder);
@@ -9561,10 +9564,10 @@ static bool haswell_get_pipe_config(struct intel_crtc *crtc,
 	if (!active)
 		goto out;
 
-	if (!transcoder_is_dsi(pipe_config->cpu_transcoder)) {
+	//if (!transcoder_is_dsi(pipe_config->cpu_transcoder)) {
 		haswell_get_ddi_port_state(crtc, pipe_config);
 		intel_get_pipe_timings(crtc, pipe_config);
-	}
+	//}
 
 	intel_get_pipe_src_size(crtc, pipe_config);
 
@@ -15510,7 +15513,8 @@ static void intel_sanitize_crtc(struct intel_crtc *crtc,
 	enum transcoder cpu_transcoder = crtc->config->cpu_transcoder;
 
 	/* Clear any frame start delays used for debugging left by the BIOS */
-	if (crtc->active && !transcoder_is_dsi(cpu_transcoder)) {
+	//if (crtc->active && !transcoder_is_dsi(cpu_transcoder)) {
+	if (crtc->active) {
 		i915_reg_t reg = PIPECONF(cpu_transcoder);
 
 		I915_WRITE(reg,
