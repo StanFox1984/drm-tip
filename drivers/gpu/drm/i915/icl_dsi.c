@@ -1215,6 +1215,21 @@ static void gen11_dsi_get_config(struct intel_encoder *encoder,
 	pipe_config->port_clock = pixel_clk;
 }
 
+static u64 gen11_dsi_get_power_domains(struct intel_encoder *encoder,
+				       struct intel_crtc_state *crtc_state)
+{
+	struct intel_dsi *intel_dsi = enc_to_intel_dsi(&encoder->base);
+	u64 domains = 0;
+	enum port port;
+
+	for_each_dsi_port(port, intel_dsi->ports)
+		domains |= (port == PORT_A ? BIT(POWER_DOMAIN_PORT_DDI_A_IO) :
+			    BIT(POWER_DOMAIN_PORT_DDI_B_IO));
+
+	DRM_DEBUG_KMS("Getting power domains %llx\n", domains);
+	return domains;
+}
+
 static bool gen11_dsi_compute_config(struct intel_encoder *encoder,
 				     struct intel_crtc_state *pipe_config,
 				     struct drm_connector_state *conn_state)
@@ -1412,12 +1427,14 @@ void intel_gen11_dsi_init(struct drm_i915_private *dev_priv)
 	intel_encoder->disable = gen11_dsi_disable;
 	intel_encoder->port = port;
 	intel_encoder->get_config = gen11_dsi_get_config;
+	intel_encoder->get_hw_state = gen11_dsi_get_hw_state;
 	intel_encoder->compute_config = gen11_dsi_compute_config;
 	intel_encoder->get_hw_state = gen11_dsi_get_hw_state;
 	intel_encoder->type = INTEL_OUTPUT_DSI;
 	intel_encoder->cloneable = 0;
 	intel_encoder->crtc_mask = BIT(PIPE_A) | BIT(PIPE_B) | BIT(PIPE_C);
 	intel_encoder->power_domain = POWER_DOMAIN_PORT_DSI;
+	intel_encoder->get_power_domains = gen11_dsi_get_power_domains;
 
 	/* register DSI connector with DRM subsystem */
 	drm_connector_init(dev, connector, &gen11_dsi_connector_funcs,

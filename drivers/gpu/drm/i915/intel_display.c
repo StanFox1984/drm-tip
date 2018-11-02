@@ -15827,8 +15827,12 @@ get_encoder_power_domains(struct drm_i915_private *dev_priv)
 		enum intel_display_power_domain domain;
 		struct intel_crtc_state *crtc_state;
 
+		DRM_DEBUG_KMS("getting power domain for encoder %s\n", encoder->base.name);
+
 		if (!encoder->get_power_domains)
 			continue;
+
+		DRM_DEBUG_KMS("getting power domain for encoder %s\n", encoder->base.name);
 
 		/*
 		 * MST-primary and inactive encoders don't have a crtc state
@@ -15836,6 +15840,8 @@ get_encoder_power_domains(struct drm_i915_private *dev_priv)
 		 */
 		if (!encoder->base.crtc)
 			continue;
+
+		DRM_DEBUG_KMS("getting power domain for encoder %s\n", encoder->base.name);
 
 		crtc_state = to_intel_crtc_state(encoder->base.crtc->state);
 		get_domains = encoder->get_power_domains(encoder, crtc_state);
