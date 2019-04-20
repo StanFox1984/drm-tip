@@ -781,7 +781,8 @@ bool drm_helper_hpd_irq_event(struct drm_device *dev)
 			      connector->name,
 			      drm_get_connector_status_name(old_status),
 			      drm_get_connector_status_name(connector->status));
-		if (old_status != connector->status)
+		if (old_status != connector->status ||
+		    connector->status == connector_status_connected)
 			changed = true;
 	}
 	drm_connector_list_iter_end(&conn_iter);
