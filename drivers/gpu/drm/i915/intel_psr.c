@@ -1251,9 +1251,12 @@ void intel_psr_short_pulse(struct intel_dp *intel_dp)
 	const u8 errors = DP_PSR_RFB_STORAGE_ERROR |
 			  DP_PSR_VSC_SDP_UNCORRECTABLE_ERROR |
 			  DP_PSR_LINK_CRC_ERROR;
+	intel_wakeref_t wakeref;
 
 	if (!CAN_PSR(dev_priv) || !intel_dp_is_edp(intel_dp))
 		return;
+
+	wakeref = intel_display_power_get(dev_priv, POWER_DOMAIN_DISPLAY_CORE);
 
 	mutex_lock(&psr->lock);
 
@@ -1294,6 +1297,9 @@ void intel_psr_short_pulse(struct intel_dp *intel_dp)
 	drm_dp_dpcd_writeb(&intel_dp->aux, DP_PSR_ERROR_STATUS, val);
 exit:
 	mutex_unlock(&psr->lock);
+
+	intel_display_power_put_async(dev_priv, POWER_DOMAIN_DISPLAY_CORE,
+				      wakeref);
 }
 
 bool intel_psr_enabled(struct intel_dp *intel_dp)
