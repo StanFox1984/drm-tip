@@ -322,8 +322,21 @@ static void bxt_exec_gpio(struct drm_i915_private *dev_priv,
 	/* XXX: this table is a quick ugly hack. */
 	static struct gpio_desc *bxt_gpio_table[U8_MAX + 1];
 	struct gpio_desc *gpio_desc = bxt_gpio_table[gpio_index];
+	int index = 0;
 
 	if (!gpio_desc) {
+		for (index = 4;index < 7;index++) {
+			gpio_desc = devm_gpiod_get_index(dev_priv->drm.dev,
+				 NULL, index,
+				 value ? GPIOD_OUT_LOW :
+				 GPIOD_OUT_HIGH);
+			if (IS_ERR_OR_NULL(gpio_desc))
+				continue;
+			printk(KERN_CRIT "GPIO index %d converts to %d", index, desc_to_gpio(gpio_desc));
+		}
+//		return;
+//		if (gpio_index == 4)
+//			gpio_index = 5;
 		gpio_desc = devm_gpiod_get_index(dev_priv->drm.dev,
 						 NULL, gpio_index,
 						 value ? GPIOD_OUT_LOW :
