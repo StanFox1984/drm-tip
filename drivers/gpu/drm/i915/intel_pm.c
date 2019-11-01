@@ -3761,7 +3761,10 @@ intel_disable_sagv(struct drm_i915_private *dev_priv)
 void intel_sagv_pre_plane_update(struct intel_atomic_state *state)
 {
 	struct drm_i915_private *dev_priv = to_i915(state->base.dev);
+	int ret;
 	const struct intel_bw_state *new_bw_state = NULL;
+	const struct intel_bw_state *old_bw_state = NULL;
+	u32 new_mask = 0;
 
 	/*
 	 * Just return if we can't control SAGV or don't have it.
@@ -3777,16 +3780,48 @@ void intel_sagv_pre_plane_update(struct intel_atomic_state *state)
 	if (!new_bw_state)
 		return;
 
-	if (!intel_can_enable_sagv(new_bw_state)) {
+	if (INTEL_GEN(dev_priv) < 11 && !intel_can_enable_sagv(new_bw_state)) {
 		intel_disable_sagv(dev_priv);
 		return;
 	}
+
+	old_bw_state = intel_atomic_get_old_bw_state(state);
+	if (!old_bw_state)
+		return;
+
+	/*
+	 * Nothing to mask
+	 */
+	if (new_bw_state->qgv_points_mask == old_bw_state->qgv_points_mask)
+		return;
+
+	new_mask = old_bw_state->qgv_points_mask | new_bw_state->qgv_points_mask;
+
+	/*
+	 * If new mask is zero - means there is nothing to mask,
+	 * we can only unmask, which should be done in unmask.
+	 */
+	if (!new_mask)
+		return;
+
+	/*
+	 * Restrict required qgv points before updating the configuration.
+	 * According to BSpec we can't mask and unmask qgv points at the same
+	 * time. Also masking should be done before updating the configuration
+	 * and unmasking afterwards.
+	 */
+	ret = icl_pcode_restrict_qgv_points(dev_priv, new_mask);
+	if (ret < 0)
+		drm_err(&dev_priv->drm, "Could not mask required qgv points(%d)\n", ret);
 }
 
 void intel_sagv_post_plane_update(struct intel_atomic_state *state)
 {
 	struct drm_i915_private *dev_priv = to_i915(state->base.dev);
+	int ret;
 	const struct intel_bw_state *new_bw_state = NULL;
+	const struct intel_bw_state *old_bw_state = NULL;
+	u32 new_mask = 0;
 
 	/*
 	 * Just return if we can't control SAGV or don't have it.
@@ -3802,10 +3837,32 @@ void intel_sagv_post_plane_update(struct intel_atomic_state *state)
 	if (!new_bw_state)
 		return;
 
-	if (intel_can_enable_sagv(new_bw_state)) {
+	if (INTEL_GEN(dev_priv) < 11 && intel_can_enable_sagv(new_bw_state)) {
 		intel_enable_sagv(dev_priv);
 		return;
 	}
+
+	old_bw_state = intel_atomic_get_old_bw_state(state);
+	if (!old_bw_state)
+		return;
+
+	/*
+	 * Nothing to unmask
+	 */
+	if (new_bw_state->qgv_points_mask == old_bw_state->qgv_points_mask)
+		return;
+
+	new_mask = new_bw_state->qgv_points_mask;
+
+	/*
+	 * Allow required qgv points after updating the configuration.
+	 * According to BSpec we can't mask and unmask qgv points at the same
+	 * time. Also masking should be done before updating the configuration
+	 * and unmasking afterwards.
+	 */
+	ret = icl_pcode_restrict_qgv_points(dev_priv, new_mask);
+	if (ret < 0)
+		drm_err(&dev_priv->drm, "Could not unmask required qgv points(%d)\n", ret);
 }
 
 static bool intel_crtc_can_enable_sagv(const struct intel_crtc_state *crtc_state)
