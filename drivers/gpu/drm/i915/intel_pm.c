@@ -3758,6 +3758,131 @@ intel_disable_sagv(struct drm_i915_private *dev_priv)
 	return 0;
 }
 
+void intel_sagv_pre_plane_update(struct intel_atomic_state *state)
+{
+	struct drm_device *dev = state->base.dev;
+	struct drm_i915_private *dev_priv = to_i915(dev);
+	int ret;
+	struct intel_bw_state *new_bw_state = NULL;
+	struct intel_bw_state *old_bw_state = NULL;
+	u32 new_mask = 0;
+
+	/*
+	 * Just return if we can't control SAGV or don't have it.
+	 * This is different from situation when we have SAGV but just can't
+	 * afford it due to DBuf limitation - in case if SAGV is completely
+	 * disabled in a BIOS, we are not even allowed to send a PCode request,
+	 * as it will throw an error. So have to check it here.
+	 */
+	if (!intel_has_sagv(dev_priv))
+		return;
+
+	/*
+	 * This is called from intel_atomic_commit_tail which is
+	 * the "point of no return". So even if we propagate it
+	 * commit tail will just print it as well.
+	 */
+	new_bw_state = intel_atomic_bw_get_state(state);
+	if (IS_ERR(new_bw_state)) {
+		WARN(1, "Could not get new bw_state\n");
+		return;
+	}
+
+	/*
+	 * At least theoretically old_bw_state can be NULL as well.
+	 */
+	old_bw_state = intel_atomic_bw_get_old_state(state);
+	if (IS_ERR_OR_NULL(old_bw_state)) {
+		WARN(1, "Could not get old bw_state\n");
+		return;
+	}
+
+	/*
+	 * Nothing to mask
+	 */
+	if (new_bw_state->qgv_points_mask == old_bw_state->qgv_points_mask)
+		return;
+
+	new_mask = old_bw_state->qgv_points_mask | new_bw_state->qgv_points_mask;
+
+	/*
+	 * If new mask is zero - means there is nothing to mask,
+	 * we can only unmask, which should be done in unmask.
+	 */
+	if (!new_mask)
+		return;
+
+	/*
+	 * Restrict required qgv points before updating the configuration.
+	 * According to BSpec we can't mask and unmask qgv points at the same
+	 * time. Also masking should be done before updating the configuration
+	 * and unmasking afterwards.
+	 */
+	ret = icl_pcode_restrict_qgv_points(dev_priv, new_mask);
+	if (ret < 0)
+		DRM_DEBUG_KMS("Could not mask required qgv points(%d)\n",
+			      ret);
+}
+
+void intel_sagv_post_plane_update(struct intel_atomic_state *state)
+{
+	struct drm_device *dev = state->base.dev;
+	struct drm_i915_private *dev_priv = to_i915(dev);
+	int ret;
+	struct intel_bw_state *new_bw_state = NULL;
+	struct intel_bw_state *old_bw_state = NULL;
+	u32 new_mask = 0;
+
+	/*
+	 * Just return if we can't control SAGV or don't have it.
+	 * This is different from situation when we have SAGV but just can't
+	 * afford it due to DBuf limitation - in case if SAGV is completely
+	 * disabled in a BIOS, we are not even allowed to send a PCode request,
+	 * as it will throw an error. So have to check it here.
+	 */
+	if (!intel_has_sagv(dev_priv))
+		return;
+
+	/*
+	 * This is called from intel_atomic_commit_tail which is
+	 * the "point of no return". So even if we propagate it
+	 * commit tail will just print it as well.
+	 */
+	new_bw_state = intel_atomic_bw_get_state(state);
+	if (IS_ERR(new_bw_state)) {
+		WARN(1, "Could not get new bw_state\n");
+		return;
+	}
+
+	/*
+	 * At least theoretically old_bw_state can be NULL as well.
+	 */
+	old_bw_state = intel_atomic_bw_get_old_state(state);
+	if (IS_ERR_OR_NULL(old_bw_state)) {
+		WARN(1, "Could not get old bw_state\n");
+		return;
+	}
+
+	/*
+	 * Nothing to unmask
+	 */
+	if (new_bw_state->qgv_points_mask == old_bw_state->qgv_points_mask)
+		return;
+
+	new_mask = new_bw_state->qgv_points_mask;
+
+	/*
+	 * Allow required qgv points after updating the configuration.
+	 * According to BSpec we can't mask and unmask qgv points at the same
+	 * time. Also masking should be done before updating the configuration
+	 * and unmasking afterwards.
+	 */
+	ret = icl_pcode_restrict_qgv_points(dev_priv, new_mask);
+	if (ret < 0)
+		DRM_DEBUG_KMS("Could not unmask required qgv points(%d)\n",
+			      ret);
+}
+
 static bool skl_can_enable_sagv_on_pipe(struct intel_crtc_state *crtc_state)
 {
 	struct drm_device *dev = crtc_state->uapi.crtc->dev;
