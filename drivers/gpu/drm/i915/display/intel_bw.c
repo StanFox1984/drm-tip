@@ -447,7 +447,7 @@ int intel_bw_atomic_check(struct intel_atomic_state *state)
 		    old_active_planes == new_active_planes)
 			continue;
 
-		bw_state  = intel_bw_get_state(state);
+		bw_state  = intel_atomic_bw_get_state(state);
 		if (IS_ERR(bw_state))
 			return PTR_ERR(bw_state);
 
