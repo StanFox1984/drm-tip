@@ -15541,6 +15541,14 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i)
 		crtc->config = new_crtc_state;
 
+	/*
+	 * Now we need to check if SAGV needs to be disabled(i.e QGV points
+	 * modified even, when no modeset is done(for example plane updates
+	 * can now trigger that).
+	 */
+	if ((INTEL_GEN(dev_priv) >= 11) && state->modeset)
+		intel_sagv_pre_plane_update(state);
+
 	if (state->modeset) {
 		drm_atomic_helper_update_legacy_modeset_state(dev, &state->base);
 
@@ -15656,6 +15664,8 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	if (INTEL_GEN(dev_priv) < 11) {
 		if (state->modeset && intel_can_enable_sagv(state))
 			intel_enable_sagv(dev_priv);
+	} else if (state->modeset) {
+		intel_sagv_post_plane_update(state);
 	}
 
 	drm_atomic_helper_commit_hw_done(&state->base);
