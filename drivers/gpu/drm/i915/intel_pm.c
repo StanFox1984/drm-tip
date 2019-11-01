@@ -43,6 +43,7 @@
 #include "i915_fixed.h"
 #include "i915_irq.h"
 #include "i915_trace.h"
+#include "display/intel_bw.h"
 #include "intel_pm.h"
 #include "intel_sideband.h"
 #include "../../../platform/x86/intel_ips.h"
@@ -3634,7 +3635,7 @@ static bool skl_needs_memory_bw_wa(struct drm_i915_private *dev_priv)
 	return IS_GEN9_BC(dev_priv) || IS_BROXTON(dev_priv);
 }
 
-static bool
+bool
 intel_has_sagv(struct drm_i915_private *dev_priv)
 {
 	/* HACK! */
@@ -3757,41 +3758,33 @@ intel_disable_sagv(struct drm_i915_private *dev_priv)
 	return 0;
 }
 
-bool intel_can_enable_sagv(struct intel_atomic_state *state)
+static bool skl_can_enable_sagv_on_pipe(struct intel_crtc_state *crtc_state)
 {
-	struct drm_device *dev = state->base.dev;
+	struct drm_device *dev = crtc_state->uapi.crtc->dev;
 	struct drm_i915_private *dev_priv = to_i915(dev);
+	struct intel_atomic_state *state = to_intel_atomic_state(crtc_state->uapi.state);
 	struct intel_crtc *crtc;
 	struct intel_plane *plane;
-	struct intel_crtc_state *crtc_state;
-	enum pipe pipe;
+	struct intel_plane_state *plane_state;
 	int level, latency;
 
-	if (!intel_has_sagv(dev_priv))
-		return false;
+	crtc = to_intel_crtc(crtc_state->uapi.crtc);
 
 	/*
-	 * If there are no active CRTCs, no additional checks need be performed
+	 * It has been recommended that for Gen 9 we switch SAGV off when
+	 * multiple pipes are used. The rest of the logic is similar for
+	 * Gen9 and Gen11.
 	 */
-	if (hweight8(state->active_pipes) == 0)
-		return true;
-
-	/*
-	 * SKL+ workaround: bspec recommends we disable SAGV when we have
-	 * more then one pipe enabled
-	 */
-	if (hweight8(state->active_pipes) > 1)
+	if ((INTEL_GEN(dev_priv) <= 9) && (hweight8(state->active_pipes) > 1))
 		return false;
 
-	/* Since we're now guaranteed to only have one active CRTC... */
-	pipe = ffs(state->active_pipes) - 1;
-	crtc = intel_get_crtc_for_pipe(dev_priv, pipe);
-	crtc_state = to_intel_crtc_state(crtc->base.state);
-
-	if (crtc_state->hw.adjusted_mode.flags & DRM_MODE_FLAG_INTERLACE)
+	if (crtc_state->hw.adjusted_mode.flags & DRM_MODE_FLAG_INTERLACE) {
+		DRM_DEBUG_KMS("No SAGV for interlaced mode on pipe %c\n",
+			      pipe_name(crtc->pipe));
 		return false;
+	}
 
-	for_each_intel_plane_on_crtc(dev, crtc, plane) {
+	intel_atomic_crtc_state_for_each_plane_state(plane, plane_state, crtc_state) {
 		struct skl_plane_wm *wm =
 			&crtc_state->wm.skl.optimal.planes[plane->id];
 
@@ -3807,7 +3800,7 @@ bool intel_can_enable_sagv(struct intel_atomic_state *state)
 		latency = dev_priv->wm.skl_latency[level];
 
 		if (skl_needs_memory_bw_wa(dev_priv) &&
-		    plane->base.state->fb->modifier ==
+		    plane_state->uapi.fb->modifier ==
 		    I915_FORMAT_MOD_X_TILED)
 			latency += 15;
 
@@ -3816,11 +3809,108 @@ bool intel_can_enable_sagv(struct intel_atomic_state *state)
 		 * incur memory latencies higher than sagv_block_time_us we
 		 * can't enable SAGV.
 		 */
-		if (latency < dev_priv->sagv_block_time_us)
+		if (latency < dev_priv->sagv_block_time_us) {
+			DRM_DEBUG_KMS("Latency %d < sagv block time %d, no SAGV for pipe %c\n",
+				      latency, dev_priv->sagv_block_time_us, pipe_name(crtc->pipe));
 			return false;
+		}
 	}
 
 	return true;
+}
+
+static bool
+tgl_can_enable_sagv_on_pipe(struct intel_crtc_state *crtc_state);
+
+static int intel_compute_sagv_mask(struct intel_atomic_state *state)
+{
+	int ret;
+	struct drm_device *dev = state->base.dev;
+	struct drm_i915_private *dev_priv = to_i915(dev);
+	struct intel_crtc *crtc;
+	struct intel_crtc_state *new_crtc_state;
+	struct intel_bw_state *new_bw_state = NULL;
+	struct intel_bw_state *old_bw_state = NULL;
+	int i;
+	bool can_sagv;
+
+	/*
+	 * If SAGV is not supported we just can't do anything
+	 * not even set or reject SAGV points - just bail out.
+	 * Thus avoid needless calculations.
+	 */
+	if (!intel_has_sagv(dev_priv))
+		return 0;
+
+	for_each_new_intel_crtc_in_state(state, crtc,
+					 new_crtc_state, i) {
+		bool pipe_sagv_enable;
+
+		new_bw_state = intel_atomic_bw_get_state(state);
+		if (IS_ERR(new_bw_state)) {
+			WARN(1, "Could not get bw_state\n");
+			return PTR_ERR(new_bw_state);
+		}
+
+		old_bw_state = intel_atomic_bw_get_old_state(state);
+
+		if (!new_crtc_state->hw.active)
+			continue;
+
+		if (INTEL_GEN(dev_priv) >= 12)
+			pipe_sagv_enable = tgl_can_enable_sagv_on_pipe(new_crtc_state);
+		else
+			pipe_sagv_enable = skl_can_enable_sagv_on_pipe(new_crtc_state);
+
+		if (pipe_sagv_enable)
+			new_bw_state->pipe_sagv_reject &= ~BIT(crtc->pipe);
+		else
+			new_bw_state->pipe_sagv_reject |= BIT(crtc->pipe);
+	}
+
+	if (!new_bw_state || !old_bw_state)
+		return 0;
+
+	can_sagv = new_bw_state->pipe_sagv_reject == 0;
+
+	for_each_new_intel_crtc_in_state(state, crtc,
+					 new_crtc_state, i) {
+		struct skl_pipe_wm *pipe_wm = &new_crtc_state->wm.skl.optimal;
+
+		/*
+		 * Due to drm limitation at commit state, when
+		 * changes are written the whole atomic state is
+		 * zeroed away => which prevents from using it,
+		 * so just sticking it into pipe wm state for
+		 * keeping it simple - anyway this is related to wm.
+		 * Proper way in ideal universe would be of course not
+		 * to lose parent atomic state object from child crtc_state,
+		 * and stick to OOP programming principles, which had been
+		 * scientifically proven to work.
+		 */
+		pipe_wm->can_sagv = can_sagv;
+	}
+
+	/*
+	 * For SAGV we need to account all the pipes,
+	 * not only the ones which are in state currently.
+	 * Grab all locks if we detect that we are actually
+	 * going to do something.
+	 */
+	if (new_bw_state->pipe_sagv_reject != old_bw_state->pipe_sagv_reject) {
+		DRM_DEBUG_KMS("State %p: old sagv mask 0x%x, new sagv mask 0x%x\n",
+			      state,
+			      old_bw_state->pipe_sagv_reject,
+			      new_bw_state->pipe_sagv_reject);
+
+		ret = intel_atomic_serialize_global_state(&new_bw_state->base);
+		if (ret) {
+			DRM_DEBUG_KMS("Could not serialize global state\n");
+			return ret;
+		}
+	}
+
+	return 0;
 }
 
 /*
@@ -4042,6 +4132,7 @@ skl_cursor_allocation(const struct intel_crtc_state *crtc_state,
 		unsigned int latency = dev_priv->wm.skl_latency[level];
 
 		skl_compute_plane_wm(crtc_state, level, latency, &wp, &wm, &wm);
+
 		if (wm.min_ddb_alloc == U16_MAX)
 			break;
 
@@ -4556,7 +4647,64 @@ skl_plane_wm_level(const struct intel_crtc_state *crtc_state,
 	const struct skl_plane_wm *wm =
 		&crtc_state->wm.skl.optimal.planes[plane_id];
 
+	if (!level) {
+		const struct skl_pipe_wm *pipe_wm = &crtc_state->wm.skl.optimal;
+
+		if (pipe_wm->can_sagv)
+			return color_plane == 0 ? &wm->sagv_wm0 : &wm->uv_sagv_wm0;
+	}
+
 	return color_plane == 0 ? &wm->wm[level] : &wm->uv_wm[level];
+}
+
+static bool
+tgl_can_enable_sagv_on_pipe(struct intel_crtc_state *crtc_state)
+{
+	struct intel_crtc *intel_crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	enum plane_id plane_id;
+
+	/*
+	 * If pipe is not active it can't affect SAGV rejection
+	 * Checking it here is needed to leave only cases when
+	 * alloc_size is 0 for any other reasons, except inactive
+	 * pipe. As inactive pipe is fine, however having no ddb
+	 * space available is already problematic - so need to
+	 * to separate those.
+	 */
+	if (!crtc_state->hw.active)
+		return true;
+
+	/*
+	 * skl_allocate_pipe_ddb already done it's job to allocate
+	 * as much blocks as possible for each plane - let's now
+	 * evaluate if those were enough to enable SAGV.
+	 * Criteria is that we need to have wm0 + sagv_block_time blocks
+	 * for level 0 for each plane.
+	 */
+	for_each_plane_id_on_crtc(intel_crtc, plane_id) {
+		struct skl_ddb_entry *plane_alloc =
+			&crtc_state->wm.skl.plane_ddb_y[plane_id];
+		struct skl_ddb_entry *uv_plane_alloc =
+			&crtc_state->wm.skl.plane_ddb_uv[plane_id];
+		const struct skl_plane_wm *wm =
+			&crtc_state->wm.skl.optimal.planes[plane_id];
+
+		if (skl_ddb_entry_size(plane_alloc) < wm->sagv_wm0.min_ddb_alloc) {
+			DRM_DEBUG_KMS("Not enough ddb blocks(%d-%d) for SAGV plane %d pipe %c\n",
+				      plane_alloc->start, plane_alloc->end, plane_id,
+				      pipe_name(intel_crtc->pipe));
+			return false;
+		}
+
+		if (skl_ddb_entry_size(uv_plane_alloc) < wm->uv_sagv_wm0.min_ddb_alloc) {
+			DRM_DEBUG_KMS("Not enough ddb blocks(%d-%d) for SAGV uv plane %d pipe %c\n",
+				      plane_alloc->start, plane_alloc->end, plane_id,
+				      pipe_name(intel_crtc->pipe));
+			return false;
+		}
+	}
+
+	return true;
 }
 
 static int
@@ -5140,11 +5288,19 @@ static void skl_compute_plane_wm(const struct intel_crtc_state *crtc_state,
 static void
 skl_compute_wm_levels(const struct intel_crtc_state *crtc_state,
 		      const struct skl_wm_params *wm_params,
-		      struct skl_wm_level *levels)
+		      struct skl_plane_wm *plane_wm,
+		      bool yuv)
 {
 	struct drm_i915_private *dev_priv = to_i915(crtc_state->uapi.crtc->dev);
 	int level, max_level = ilk_wm_max_level(dev_priv);
+	/*
+	 * Check which kind of plane is it and based on that calculate
+	 * correspondent WM levels.
+	 */
+	struct skl_wm_level *levels = yuv ? plane_wm->uv_wm : plane_wm->wm;
 	struct skl_wm_level *result_prev = &levels[0];
+	struct skl_wm_level *sagv_wm = yuv ?
+				&plane_wm->uv_sagv_wm0 : &plane_wm->sagv_wm0;
 
 	for (level = 0; level <= max_level; level++) {
 		struct skl_wm_level *result = &levels[level];
@@ -5154,6 +5310,27 @@ skl_compute_wm_levels(const struct intel_crtc_state *crtc_state,
 				     wm_params, result_prev, result);
 
 		result_prev = result;
+	}
+	/*
+	 * For Gen12 if it is an L0 we need to also
+	 * consider sagv_block_time when calculating
+	 * L0 watermark - we will need that when making
+	 * a decision whether enable SAGV or not.
+	 * For older gens we agreed to copy L0 value for
+	 * compatibility.
+	 */
+	if ((INTEL_GEN(dev_priv) >= 12)) {
+		u32 latency = dev_priv->wm.skl_latency[0];
+
+		latency += dev_priv->sagv_block_time_us;
+		skl_compute_plane_wm(crtc_state, 0, latency,
+				     wm_params, &levels[0],
+				     sagv_wm);
+		DRM_DEBUG_KMS("%d L0 blocks required for SAGV vs %d for non-SAGV\n",
+			      sagv_wm->min_ddb_alloc, levels[0].min_ddb_alloc);
+	} else {
+		/* Since all members are POD */
+		*sagv_wm = levels[0];
 	}
 }
 
@@ -5237,7 +5414,7 @@ static int skl_build_plane_wm_single(struct intel_crtc_state *crtc_state,
 	if (ret)
 		return ret;
 
-	skl_compute_wm_levels(crtc_state, &wm_params, wm->wm);
+	skl_compute_wm_levels(crtc_state, &wm_params, wm, false);
 	skl_compute_transition_wm(crtc_state, &wm_params, wm);
 
 	return 0;
@@ -5259,7 +5436,7 @@ static int skl_build_plane_wm_uv(struct intel_crtc_state *crtc_state,
 	if (ret)
 		return ret;
 
-	skl_compute_wm_levels(crtc_state, &wm_params, wm->uv_wm);
+	skl_compute_wm_levels(crtc_state, &wm_params, wm, true);
 
 	return 0;
 }
@@ -5598,9 +5775,25 @@ skl_print_wm_changes(struct intel_atomic_state *state)
 		for_each_intel_plane_on_crtc(&dev_priv->drm, crtc, plane) {
 			enum plane_id plane_id = plane->id;
 			const struct skl_plane_wm *old_wm, *new_wm;
+			const struct skl_wm_level *old_wm_level, *new_wm_level;
+			u16 old_plane_res_l, new_plane_res_l;
+			u8  old_plane_res_b, new_plane_res_b;
+			u16 old_min_ddb_alloc, new_min_ddb_alloc;
+			int color_plane = 0;
 
 			old_wm = &old_pipe_wm->planes[plane_id];
 			new_wm = &new_pipe_wm->planes[plane_id];
+			old_wm_level = skl_plane_wm_level(old_crtc_state, plane_id, 0, color_plane);
+			new_wm_level = skl_plane_wm_level(new_crtc_state, plane_id, 0, color_plane);
+
+			old_plane_res_l = old_wm_level->plane_res_l;
+			old_plane_res_b = old_wm_level->plane_res_b;
+
+			new_plane_res_l = new_wm_level->plane_res_l;
+			new_plane_res_b = new_wm_level->plane_res_b;
+
+			old_min_ddb_alloc = old_wm_level->min_ddb_alloc;
+			new_min_ddb_alloc = new_wm_level->min_ddb_alloc;
 
 			if (skl_plane_wm_equals(dev_priv, old_wm, new_wm))
 				continue;
@@ -5624,7 +5817,7 @@ skl_print_wm_changes(struct intel_atomic_state *state)
 				    "[PLANE:%d:%s]   lines %c%3d,%c%3d,%c%3d,%c%3d,%c%3d,%c%3d,%c%3d,%c%3d,%c%3d"
 				      " -> %c%3d,%c%3d,%c%3d,%c%3d,%c%3d,%c%3d,%c%3d,%c%3d,%c%3d\n",
 				    plane->base.base.id, plane->base.name,
-				    enast(old_wm->wm[0].ignore_lines), old_wm->wm[0].plane_res_l,
+				    enast(old_wm->wm[0].ignore_lines), old_plane_res_l,
 				    enast(old_wm->wm[1].ignore_lines), old_wm->wm[1].plane_res_l,
 				    enast(old_wm->wm[2].ignore_lines), old_wm->wm[2].plane_res_l,
 				    enast(old_wm->wm[3].ignore_lines), old_wm->wm[3].plane_res_l,
@@ -5634,7 +5827,7 @@ skl_print_wm_changes(struct intel_atomic_state *state)
 				    enast(old_wm->wm[7].ignore_lines), old_wm->wm[7].plane_res_l,
 				    enast(old_wm->trans_wm.ignore_lines), old_wm->trans_wm.plane_res_l,
 
-				    enast(new_wm->wm[0].ignore_lines), new_wm->wm[0].plane_res_l,
+				    enast(new_wm->wm[0].ignore_lines), new_plane_res_l,
 				    enast(new_wm->wm[1].ignore_lines), new_wm->wm[1].plane_res_l,
 				    enast(new_wm->wm[2].ignore_lines), new_wm->wm[2].plane_res_l,
 				    enast(new_wm->wm[3].ignore_lines), new_wm->wm[3].plane_res_l,
@@ -5648,12 +5841,12 @@ skl_print_wm_changes(struct intel_atomic_state *state)
 				    "[PLANE:%d:%s]  blocks %4d,%4d,%4d,%4d,%4d,%4d,%4d,%4d,%4d"
 				    " -> %4d,%4d,%4d,%4d,%4d,%4d,%4d,%4d,%4d\n",
 				    plane->base.base.id, plane->base.name,
-				    old_wm->wm[0].plane_res_b, old_wm->wm[1].plane_res_b,
+				    old_plane_res_b, old_wm->wm[1].plane_res_b,
 				    old_wm->wm[2].plane_res_b, old_wm->wm[3].plane_res_b,
 				    old_wm->wm[4].plane_res_b, old_wm->wm[5].plane_res_b,
 				    old_wm->wm[6].plane_res_b, old_wm->wm[7].plane_res_b,
 				    old_wm->trans_wm.plane_res_b,
-				    new_wm->wm[0].plane_res_b, new_wm->wm[1].plane_res_b,
+				    new_plane_res_b, new_wm->wm[1].plane_res_b,
 				    new_wm->wm[2].plane_res_b, new_wm->wm[3].plane_res_b,
 				    new_wm->wm[4].plane_res_b, new_wm->wm[5].plane_res_b,
 				    new_wm->wm[6].plane_res_b, new_wm->wm[7].plane_res_b,
@@ -5663,12 +5856,12 @@ skl_print_wm_changes(struct intel_atomic_state *state)
 				    "[PLANE:%d:%s] min_ddb %4d,%4d,%4d,%4d,%4d,%4d,%4d,%4d,%4d"
 				    " -> %4d,%4d,%4d,%4d,%4d,%4d,%4d,%4d,%4d\n",
 				    plane->base.base.id, plane->base.name,
-				    old_wm->wm[0].min_ddb_alloc, old_wm->wm[1].min_ddb_alloc,
+				    old_min_ddb_alloc, old_wm->wm[1].min_ddb_alloc,
 				    old_wm->wm[2].min_ddb_alloc, old_wm->wm[3].min_ddb_alloc,
 				    old_wm->wm[4].min_ddb_alloc, old_wm->wm[5].min_ddb_alloc,
 				    old_wm->wm[6].min_ddb_alloc, old_wm->wm[7].min_ddb_alloc,
 				    old_wm->trans_wm.min_ddb_alloc,
-				    new_wm->wm[0].min_ddb_alloc, new_wm->wm[1].min_ddb_alloc,
+				    new_min_ddb_alloc, new_wm->wm[1].min_ddb_alloc,
 				    new_wm->wm[2].min_ddb_alloc, new_wm->wm[3].min_ddb_alloc,
 				    new_wm->wm[4].min_ddb_alloc, new_wm->wm[5].min_ddb_alloc,
 				    new_wm->wm[6].min_ddb_alloc, new_wm->wm[7].min_ddb_alloc,
@@ -5833,6 +6026,10 @@ skl_compute_wm(struct intel_atomic_state *state)
 	if (ret)
 		return ret;
 
+	ret = intel_compute_sagv_mask(state);
+	if (ret)
+		return ret;
+
 	/*
 	 * skl_compute_ddb() will have adjusted the final watermarks
 	 * based on how much ddb is available. Now we can actually
@@ -5960,6 +6157,9 @@ void skl_pipe_wm_get_hw_state(struct intel_crtc *crtc,
 				val = I915_READ(CUR_WM(pipe, level));
 
 			skl_wm_level_from_reg_val(val, &wm->wm[level]);
+			if (level == 0)
+				memcpy(&wm->sagv_wm0, &wm->wm[level],
+				       sizeof(struct skl_wm_level));
 		}
 
 		if (plane_id != PLANE_CURSOR)
