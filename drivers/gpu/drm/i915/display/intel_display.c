@@ -15539,22 +15539,16 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 		crtc->config = new_crtc_state;
 
 	if (state->modeset) {
-		struct intel_bw_state *bw_state;
-
-		bw_state = intel_atomic_get_bw_new_state(state);
+		/*
+		 * Now we need to check if SAGV needs to be disabled(i.e QGV points
+		 * modified even, when no modeset is done(for example plane updates
+		 * can now trigger that).
+		 */
+		intel_sagv_pre_plane_update(state);
 
 		drm_atomic_helper_update_legacy_modeset_state(dev, &state->base);
 
 		intel_set_cdclk_pre_plane_update(state);
-
-		/*
-		 * SKL workaround: bspec recommends we disable the SAGV when we
-		 * have more then one pipe enabled
-		 */
-		if (INTEL_GEN(dev_priv) < 11) {
-			if (!intel_can_enable_sagv(bw_state))
-				intel_disable_sagv(dev_priv);
-		}
 
 		intel_modeset_verify_disabled(dev_priv, state);
 	}
@@ -15651,17 +15645,10 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	intel_check_cpu_fifo_underruns(dev_priv);
 	intel_check_pch_fifo_underruns(dev_priv);
 
-	if (state->modeset)
+	if (state->modeset) {
 		intel_verify_planes(state);
 
-	if (INTEL_GEN(dev_priv) < 11) {
-		struct intel_bw_state *bw_state;
-
-		bw_state = intel_atomic_get_bw_new_state(state);
-
-		if (state->modeset && intel_can_enable_sagv(bw_state)) {
-			intel_enable_sagv(dev_priv);
-		}
+		intel_sagv_post_plane_update(state);
 	}
 
 	drm_atomic_helper_commit_hw_done(&state->base);
