@@ -14008,7 +14008,9 @@ static void verify_wm_state(struct intel_crtc *crtc,
 		/* Watermarks */
 		for (level = 0; level <= max_level; level++) {
 			if (skl_wm_level_equals(&hw_plane_wm->wm[level],
-						&sw_plane_wm->wm[level]))
+						&sw_plane_wm->wm[level]) ||
+			    (level == 0 && skl_wm_level_equals(&hw_plane_wm->wm[level],
+							       &sw_plane_wm->sagv_wm0)))
 				continue;
 
 			drm_err(&dev_priv->drm,
@@ -14063,7 +14065,10 @@ static void verify_wm_state(struct intel_crtc *crtc,
 		/* Watermarks */
 		for (level = 0; level <= max_level; level++) {
 			if (skl_wm_level_equals(&hw_plane_wm->wm[level],
-						&sw_plane_wm->wm[level]))
+						&sw_plane_wm->wm[level]) ||
+			   (skl_wm_level_equals(&hw_plane_wm->wm[level],
+						&sw_plane_wm->sagv_wm0) &&
+			   (level == 0)))
 				continue;
 
 			drm_err(&dev_priv->drm,
@@ -15534,6 +15539,10 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 		crtc->config = new_crtc_state;
 
 	if (state->modeset) {
+		struct intel_bw_state *bw_state;
+
+		bw_state = intel_atomic_get_bw_new_state(state);
+
 		drm_atomic_helper_update_legacy_modeset_state(dev, &state->base);
 
 		intel_set_cdclk_pre_plane_update(state);
@@ -15542,8 +15551,10 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 		 * SKL workaround: bspec recommends we disable the SAGV when we
 		 * have more then one pipe enabled
 		 */
-		if (!intel_can_enable_sagv(state))
-			intel_disable_sagv(dev_priv);
+		if (INTEL_GEN(dev_priv) < 11) {
+			if (!intel_can_enable_sagv(bw_state))
+				intel_disable_sagv(dev_priv);
+		}
 
 		intel_modeset_verify_disabled(dev_priv, state);
 	}
@@ -15643,8 +15654,15 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	if (state->modeset)
 		intel_verify_planes(state);
 
-	if (state->modeset && intel_can_enable_sagv(state))
-		intel_enable_sagv(dev_priv);
+	if (INTEL_GEN(dev_priv) < 11) {
+		struct intel_bw_state *bw_state;
+
+		bw_state = intel_atomic_get_bw_new_state(state);
+
+		if (state->modeset && intel_can_enable_sagv(bw_state)) {
+			intel_enable_sagv(dev_priv);
+		}
+	}
 
 	drm_atomic_helper_commit_hw_done(&state->base);
 
@@ -15796,7 +15814,6 @@ static int intel_atomic_commit(struct drm_device *dev,
 
 	if (state->global_state_changed) {
 		assert_global_state_locked(dev_priv);
-
 		dev_priv->active_pipes = state->active_pipes;
 	}
 
