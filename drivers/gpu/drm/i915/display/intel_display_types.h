@@ -680,6 +680,9 @@ enum color_plane
 	COLOR_PLANE_UV
 };
 
+/* BSpec precisely defines this */
+#define NUM_SAGV_POINTS 8
+
 struct skl_pipe_wm {
 	struct skl_plane_wm planes[I915_MAX_PLANES];
 	bool can_sagv;
