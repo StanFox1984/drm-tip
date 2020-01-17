@@ -4547,6 +4547,18 @@ icl_get_total_relative_data_rate(struct intel_crtc_state *crtc_state,
 	return total_data_rate;
 }
 
+static const struct skl_wm_level *
+skl_plane_wm_level(const struct intel_crtc_state *crtc_state,
+		   enum plane_id plane_id,
+		   int level,
+		   int color_plane)
+{
+	const struct skl_plane_wm *wm =
+		&crtc_state->wm.skl.optimal.planes[plane_id];
+
+	return color_plane == 0 ? &wm->wm[level] : &wm->uv_wm[level];
+}
+
 static int
 skl_allocate_pipe_ddb(struct intel_crtc_state *crtc_state)
 {
@@ -4606,22 +4618,29 @@ skl_allocate_pipe_ddb(struct intel_crtc_state *crtc_state)
 	 */
 	for (level = ilk_wm_max_level(dev_priv); level >= 0; level--) {
 		blocks = 0;
+
 		for_each_plane_id_on_crtc(crtc, plane_id) {
-			const struct skl_plane_wm *wm =
-				&crtc_state->wm.skl.optimal.planes[plane_id];
+			const struct skl_wm_level *wm_level;
+			const struct skl_wm_level *wm_uv_level;
+			int color_plane = 0;
+
+			wm_level = skl_plane_wm_level(crtc_state, plane_id,
+						      level, color_plane);
+			wm_uv_level = skl_plane_wm_level(crtc_state, plane_id,
+							 level, color_plane + 1);
 
 			if (plane_id == PLANE_CURSOR) {
-				if (wm->wm[level].min_ddb_alloc > total[PLANE_CURSOR]) {
+				if (wm_level->min_ddb_alloc > total[PLANE_CURSOR]) {
 					drm_WARN_ON(&dev_priv->drm,
-						    wm->wm[level].min_ddb_alloc != U16_MAX);
+						    wm_level->min_ddb_alloc != U16_MAX);
 					blocks = U32_MAX;
 					break;
 				}
 				continue;
 			}
 
-			blocks += wm->wm[level].min_ddb_alloc;
-			blocks += wm->uv_wm[level].min_ddb_alloc;
+			blocks += wm_level->min_ddb_alloc;
+			blocks += wm_uv_level->min_ddb_alloc;
 		}
 
 		if (blocks <= alloc_size) {
@@ -4644,10 +4663,16 @@ skl_allocate_pipe_ddb(struct intel_crtc_state *crtc_state)
 	 * proportional to its relative data rate.
 	 */
 	for_each_plane_id_on_crtc(crtc, plane_id) {
-		const struct skl_plane_wm *wm =
-			&crtc_state->wm.skl.optimal.planes[plane_id];
+		const struct skl_wm_level *wm_level;
+		const struct skl_wm_level *wm_uv_level;
 		u64 rate;
 		u16 extra;
+		int color_plane = 0;
+
+		wm_level = skl_plane_wm_level(crtc_state, plane_id,
+					      level, color_plane);
+		wm_uv_level = skl_plane_wm_level(crtc_state, plane_id,
+						 level, color_plane + 1);
 
 		if (plane_id == PLANE_CURSOR)
 			continue;
@@ -4663,7 +4688,7 @@ skl_allocate_pipe_ddb(struct intel_crtc_state *crtc_state)
 		extra = min_t(u16, alloc_size,
 			      DIV64_U64_ROUND_UP(alloc_size * rate,
 						 total_data_rate));
-		total[plane_id] = wm->wm[level].min_ddb_alloc + extra;
+		total[plane_id] = wm_level->min_ddb_alloc + extra;
 		alloc_size -= extra;
 		total_data_rate -= rate;
 
@@ -4674,7 +4699,7 @@ skl_allocate_pipe_ddb(struct intel_crtc_state *crtc_state)
 		extra = min_t(u16, alloc_size,
 			      DIV64_U64_ROUND_UP(alloc_size * rate,
 						 total_data_rate));
-		uv_total[plane_id] = wm->uv_wm[level].min_ddb_alloc + extra;
+		uv_total[plane_id] = wm_uv_level->min_ddb_alloc + extra;
 		alloc_size -= extra;
 		total_data_rate -= rate;
 	}
@@ -4717,8 +4742,16 @@ skl_allocate_pipe_ddb(struct intel_crtc_state *crtc_state)
 	 */
 	for (level++; level <= ilk_wm_max_level(dev_priv); level++) {
 		for_each_plane_id_on_crtc(crtc, plane_id) {
+			const struct skl_wm_level *wm_level;
+			const struct skl_wm_level *wm_uv_level;
 			struct skl_plane_wm *wm =
 				&crtc_state->wm.skl.optimal.planes[plane_id];
+			int color_plane = 0;
+
+			wm_level = skl_plane_wm_level(crtc_state, plane_id,
+						      level, color_plane);
+			wm_uv_level = skl_plane_wm_level(crtc_state, plane_id,
+							 level, color_plane + 1);
 
 			/*
 			 * We only disable the watermarks for each plane if
@@ -4732,9 +4765,10 @@ skl_allocate_pipe_ddb(struct intel_crtc_state *crtc_state)
 			 *  planes must be enabled before the level will be used."
 			 * So this is actually safe to do.
 			 */
-			if (wm->wm[level].min_ddb_alloc > total[plane_id] ||
-			    wm->uv_wm[level].min_ddb_alloc > uv_total[plane_id])
-				memset(&wm->wm[level], 0, sizeof(wm->wm[level]));
+			if (wm_level->min_ddb_alloc > total[plane_id] ||
+			    wm_uv_level->min_ddb_alloc > uv_total[plane_id])
+				memset(&wm->wm[level], 0,
+				       sizeof(struct skl_wm_level));
 
 			/*
 			 * Wa_1408961008:icl, ehl
@@ -4742,9 +4776,14 @@ skl_allocate_pipe_ddb(struct intel_crtc_state *crtc_state)
 			 */
 			if (IS_GEN(dev_priv, 11) &&
 			    level == 1 && wm->wm[0].plane_en) {
-				wm->wm[level].plane_res_b = wm->wm[0].plane_res_b;
-				wm->wm[level].plane_res_l = wm->wm[0].plane_res_l;
-				wm->wm[level].ignore_lines = wm->wm[0].ignore_lines;
+				wm_level = skl_plane_wm_level(crtc_state, plane_id,
+							      0, color_plane);
+				wm->wm[level].plane_res_b =
+					wm_level->plane_res_b;
+				wm->wm[level].plane_res_l =
+					wm_level->plane_res_l;
+				wm->wm[level].ignore_lines =
+					wm_level->ignore_lines;
 			}
 		}
 	}
@@ -5358,8 +5397,13 @@ void skl_write_plane_wm(struct intel_plane *plane,
 		&crtc_state->wm.skl.plane_ddb_uv[plane_id];
 
 	for (level = 0; level <= max_level; level++) {
+		const struct skl_wm_level *wm_level;
+		int color_plane = 0;
+
+		wm_level = skl_plane_wm_level(crtc_state, plane_id, level, color_plane);
+
 		skl_write_wm_level(dev_priv, PLANE_WM(pipe, plane_id, level),
-				   &wm->wm[level]);
+				   wm_level);
 	}
 	skl_write_wm_level(dev_priv, PLANE_WM_TRANS(pipe, plane_id),
 			   &wm->trans_wm);
@@ -5392,8 +5436,13 @@ void skl_write_cursor_wm(struct intel_plane *plane,
 		&crtc_state->wm.skl.plane_ddb_y[plane_id];
 
 	for (level = 0; level <= max_level; level++) {
+		const struct skl_wm_level *wm_level;
+		int color_plane = 0;
+
+		wm_level = skl_plane_wm_level(crtc_state, plane_id, level, color_plane);
+
 		skl_write_wm_level(dev_priv, CUR_WM(pipe, level),
-				   &wm->wm[level]);
+				   wm_level);
 	}
 	skl_write_wm_level(dev_priv, CUR_WM_TRANS(pipe), &wm->trans_wm);
 
