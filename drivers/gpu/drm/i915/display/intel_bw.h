@@ -24,6 +24,15 @@ struct intel_bw_state {
 
 #define to_intel_bw_state(x) container_of((x), struct intel_bw_state, base)
 
+struct intel_bw_state *
+intel_bw_get_old_state(struct intel_atomic_state *state);
+
+struct intel_bw_state *
+intel_bw_get_new_state(struct intel_atomic_state *state);
+
+struct intel_bw_state *
+intel_bw_get_state(struct intel_atomic_state *state);
+
 void intel_bw_init_hw(struct drm_i915_private *dev_priv);
 int intel_bw_init(struct drm_i915_private *dev_priv);
 int intel_bw_atomic_check(struct intel_atomic_state *state);
