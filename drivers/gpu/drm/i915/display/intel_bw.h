@@ -18,11 +18,26 @@ struct intel_crtc_state;
 struct intel_bw_state {
 	struct intel_global_state base;
 
+	/*
+	 * Contains a bit mask, used to determine, whether correspondent
+	 * pipe allows SAGV or not.
+	 */
+	u8 pipe_sagv_reject;
+
 	unsigned int data_rate[I915_MAX_PIPES];
 	u8 num_active_planes[I915_MAX_PIPES];
 };
 
 #define to_intel_bw_state(x) container_of((x), struct intel_bw_state, base)
+
+struct intel_bw_state *
+intel_atomic_bw_get_old_state(struct intel_atomic_state *state);
+
+struct intel_bw_state *
+intel_atomic_bw_get_new_state(struct intel_atomic_state *state);
+
+struct intel_bw_state *
+intel_atomic_bw_get_state(struct intel_atomic_state *state);
 
 void intel_bw_init_hw(struct drm_i915_private *dev_priv);
 int intel_bw_init(struct drm_i915_private *dev_priv);
