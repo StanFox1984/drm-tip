@@ -28,6 +28,17 @@ void intel_pipe_update_end(struct intel_crtc_state *new_crtc_state);
 int intel_plane_check_stride(const struct intel_plane_state *plane_state);
 int intel_plane_check_src_coordinates(struct intel_plane_state *plane_state);
 int chv_plane_check_rotation(const struct intel_plane_state *plane_state);
+void i845_update_cursor_hw(struct intel_plane *plane,
+			   const struct intel_crtc_state *crtc_state,
+			   const struct intel_plane_state *plane_state);
+void i845_disable_cursor_hw(struct intel_plane *plane,
+			    const struct intel_crtc_state *crtc_state);
+void i9xx_update_cursor_hw(struct intel_plane *plane,
+			   const struct intel_crtc_state *crtc_state,
+			   const struct intel_plane_state *plane_state);
+void i9xx_disable_cursor_hw(struct intel_plane *plane,
+			    const struct intel_crtc_state *crtc_state);
+
 struct intel_plane *
 skl_universal_plane_create(struct drm_i915_private *dev_priv,
 			   enum pipe pipe, enum plane_id plane_id);

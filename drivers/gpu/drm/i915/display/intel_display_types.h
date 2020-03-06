@@ -1158,11 +1158,10 @@ struct intel_plane {
 	unsigned int (*max_stride)(struct intel_plane *plane,
 				   u32 pixel_format, u64 modifier,
 				   unsigned int rotation);
-	void (*update_plane)(struct intel_plane *plane,
-			     const struct intel_crtc_state *crtc_state,
-			     const struct intel_plane_state *plane_state);
-	void (*disable_plane)(struct intel_plane *plane,
-			      const struct intel_crtc_state *crtc_state);
+	void (*update_plane)(struct intel_atomic_state *state,
+			     struct intel_plane *plane);
+	void (*disable_plane)(struct intel_atomic_state *state,
+			      struct intel_plane *plane);
 	bool (*get_hw_state)(struct intel_plane *plane, enum pipe *pipe);
 	int (*check_plane)(struct intel_crtc_state *crtc_state,
 			   struct intel_plane_state *plane_state);

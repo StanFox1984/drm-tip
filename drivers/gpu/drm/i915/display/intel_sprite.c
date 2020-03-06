@@ -588,12 +588,14 @@ icl_program_input_csc(struct intel_plane *plane,
 }
 
 static void
-skl_program_plane(struct intel_plane *plane,
-		  const struct intel_crtc_state *crtc_state,
-		  const struct intel_plane_state *plane_state,
+skl_program_plane(struct intel_atomic_state *state,
+		  struct intel_plane *plane,
 		  int color_plane)
 {
 	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
+	struct intel_plane_state *plane_state = intel_atomic_get_plane_state(state, plane);
+	struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, plane->pipe);
+	struct intel_crtc_state *crtc_state = intel_atomic_get_crtc_state(state, crtc);
 	enum plane_id plane_id = plane->id;
 	enum pipe pipe = plane->pipe;
 	const struct drm_intel_sprite_colorkey *key = &plane_state->ckey;
@@ -660,7 +662,7 @@ skl_program_plane(struct intel_plane *plane,
 	if (fb->format->is_yuv && icl_is_hdr_plane(dev_priv, plane_id))
 		icl_program_input_csc(plane, crtc_state, plane_state);
 
-	skl_write_plane_wm(plane, crtc_state);
+	skl_write_plane_wm(state, plane);
 
 	intel_de_write_fw(dev_priv, PLANE_KEYVAL(pipe, plane_id),
 			  key->min_value);
@@ -690,10 +692,13 @@ skl_program_plane(struct intel_plane *plane,
 }
 
 static void
-skl_update_plane(struct intel_plane *plane,
-		 const struct intel_crtc_state *crtc_state,
-		 const struct intel_plane_state *plane_state)
+skl_update_plane(struct intel_atomic_state *state,
+		 struct intel_plane *plane)
 {
+	struct intel_plane_state *plane_state = intel_atomic_get_plane_state(state, plane);
+	struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, plane->pipe);
+	struct intel_crtc_state *crtc_state = intel_atomic_get_crtc_state(state, crtc);
+
 	int color_plane = 0;
 
 	if (plane_state->planar_linked_plane && !plane_state->planar_slave)
@@ -703,8 +708,8 @@ skl_update_plane(struct intel_plane *plane,
 	skl_program_plane(plane, crtc_state, plane_state, color_plane);
 }
 static void
-skl_disable_plane(struct intel_plane *plane,
-		  const struct intel_crtc_state *crtc_state)
+skl_disable_plane(struct intel_atomic_state *state,
+		  struct intel_plane *plane)
 {
 	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
 	enum plane_id plane_id = plane->id;
@@ -716,7 +721,7 @@ skl_disable_plane(struct intel_plane *plane,
 	if (icl_is_hdr_plane(dev_priv, plane_id))
 		intel_de_write_fw(dev_priv, PLANE_CUS_CTL(pipe, plane_id), 0);
 
-	skl_write_plane_wm(plane, crtc_state);
+	skl_write_plane_wm(state, plane);
 
 	intel_de_write_fw(dev_priv, PLANE_CTL(pipe, plane_id), 0);
 	intel_de_write_fw(dev_priv, PLANE_SURF(pipe, plane_id), 0);
@@ -1058,11 +1063,13 @@ static void vlv_update_gamma(const struct intel_plane_state *plane_state)
 }
 
 static void
-vlv_update_plane(struct intel_plane *plane,
-		 const struct intel_crtc_state *crtc_state,
-		 const struct intel_plane_state *plane_state)
+vlv_update_plane(struct intel_atomic_state *state,
+		 struct intel_plane *plane)
 {
 	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
+	struct intel_plane_state *plane_state = intel_atomic_get_plane_state(state, plane);
+	struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, plane->pipe);
+	struct intel_crtc_state *crtc_state = intel_atomic_get_crtc_state(state, crtc);
 	enum pipe pipe = plane->pipe;
 	enum plane_id plane_id = plane->id;
 	u32 sprsurf_offset = plane_state->color_plane[0].offset;
@@ -1126,8 +1133,8 @@ vlv_update_plane(struct intel_plane *plane,
 }
 
 static void
-vlv_disable_plane(struct intel_plane *plane,
-		  const struct intel_crtc_state *crtc_state)
+vlv_disable_plane(struct intel_atomic_state *state,
+		  struct intel_plane *plane)
 {
 	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
 	enum pipe pipe = plane->pipe;
@@ -1476,11 +1483,13 @@ static void ivb_update_gamma(const struct intel_plane_state *plane_state)
 }
 
 static void
-ivb_update_plane(struct intel_plane *plane,
-		 const struct intel_crtc_state *crtc_state,
-		 const struct intel_plane_state *plane_state)
+ivb_update_plane(struct intel_atomic_state *state,
+		 struct intel_plane *plane)
 {
 	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
+	struct intel_plane_state *plane_state = intel_atomic_get_plane_state(state, plane);
+	struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, plane->pipe);
+	struct intel_crtc_state *crtc_state = intel_atomic_get_crtc_state(state, crtc);
 	enum pipe pipe = plane->pipe;
 	u32 sprsurf_offset = plane_state->color_plane[0].offset;
 	u32 linear_offset;
@@ -1549,8 +1558,8 @@ ivb_update_plane(struct intel_plane *plane,
 }
 
 static void
-ivb_disable_plane(struct intel_plane *plane,
-		  const struct intel_crtc_state *crtc_state)
+ivb_disable_plane(struct intel_atomic_state *state,
+		  struct intel_plane *plane)
 {
 	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
 	enum pipe pipe = plane->pipe;
@@ -1786,11 +1795,13 @@ static void ilk_update_gamma(const struct intel_plane_state *plane_state)
 }
 
 static void
-g4x_update_plane(struct intel_plane *plane,
-		 const struct intel_crtc_state *crtc_state,
-		 const struct intel_plane_state *plane_state)
+g4x_update_plane(struct intel_atomic_state *state,
+		 struct intel_plane *plane)
 {
 	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
+	struct intel_plane_state *plane_state = intel_atomic_get_plane_state(state, plane);
+	struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, plane->pipe);
+	struct intel_crtc_state *crtc_state = intel_atomic_get_crtc_state(state, crtc);
 	enum pipe pipe = plane->pipe;
 	u32 dvssurf_offset = plane_state->color_plane[0].offset;
 	u32 linear_offset;
@@ -1855,8 +1866,8 @@ g4x_update_plane(struct intel_plane *plane,
 }
 
 static void
-g4x_disable_plane(struct intel_plane *plane,
-		  const struct intel_crtc_state *crtc_state)
+g4x_disable_plane(struct intel_atomic_state *state,
+		  struct intel_plane *plane)
 {
 	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
 	enum pipe pipe = plane->pipe;
@@ -3021,6 +3032,132 @@ static bool skl_plane_has_ccs(struct drm_i915_private *dev_priv,
 	return pipe != PIPE_C &&
 		(plane_id == PLANE_PRIMARY ||
 		 plane_id == PLANE_SPRITE0);
+}
+
+void i845_update_cursor_hw(struct intel_plane *plane,
+			   const struct intel_crtc_state *crtc_state,
+			   const struct intel_plane_state *plane_state)
+{
+	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
+	u32 cntl = 0, base = 0, pos = 0, size = 0;
+	unsigned long irqflags;
+
+	if (plane_state && plane_state->uapi.visible) {
+		unsigned int width = drm_rect_width(&plane_state->uapi.dst);
+		unsigned int height = drm_rect_height(&plane_state->uapi.dst);
+
+		cntl = plane_state->ctl |
+			i845_cursor_ctl_crtc(crtc_state);
+
+		size = (height << 12) | width;
+
+		base = intel_cursor_base(plane_state);
+		pos = intel_cursor_position(plane_state);
+	}
+
+	spin_lock_irqsave(&dev_priv->uncore.lock, irqflags);
+
+	/* On these chipsets we can only modify the base/size/stride
+	 * whilst the cursor is disabled.
+	 */
+	if (plane->cursor.base != base ||
+	    plane->cursor.size != size ||
+	    plane->cursor.cntl != cntl) {
+		intel_de_write_fw(dev_priv, CURCNTR(PIPE_A), 0);
+		intel_de_write_fw(dev_priv, CURBASE(PIPE_A), base);
+		intel_de_write_fw(dev_priv, CURSIZE, size);
+		intel_de_write_fw(dev_priv, CURPOS(PIPE_A), pos);
+		intel_de_write_fw(dev_priv, CURCNTR(PIPE_A), cntl);
+
+		plane->cursor.base = base;
+		plane->cursor.size = size;
+		plane->cursor.cntl = cntl;
+	} else {
+		intel_de_write_fw(dev_priv, CURPOS(PIPE_A), pos);
+	}
+
+	spin_unlock_irqrestore(&dev_priv->uncore.lock, irqflags);
+}
+
+void i845_disable_cursor_hw(struct intel_plane *plane,
+			    const struct intel_crtc_state *crtc_state)
+{
+	i845_update_cursor_hw(plane, crtc_state, NULL);
+}
+
+void i9xx_update_cursor_hw(struct intel_plane *plane,
+			   const struct intel_crtc_state *crtc_state,
+			   const struct intel_plane_state *plane_state)
+{
+	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
+	enum pipe pipe = plane->pipe;
+	u32 cntl = 0, base = 0, pos = 0, fbc_ctl = 0;
+	unsigned long irqflags;
+
+	if (plane_state && plane_state->uapi.visible) {
+		unsigned width = drm_rect_width(&plane_state->uapi.dst);
+		unsigned height = drm_rect_height(&plane_state->uapi.dst);
+
+		cntl = plane_state->ctl |
+			i9xx_cursor_ctl_crtc(crtc_state);
+
+		if (width != height)
+			fbc_ctl = CUR_FBC_CTL_EN | (height - 1);
+
+		base = intel_cursor_base(plane_state);
+		pos = intel_cursor_position(plane_state);
+	}
+
+	spin_lock_irqsave(&dev_priv->uncore.lock, irqflags);
+
+	/*
+	 * On some platforms writing CURCNTR first will also
+	 * cause CURPOS to be armed by the CURBASE write.
+	 * Without the CURCNTR write the CURPOS write would
+	 * arm itself. Thus we always update CURCNTR before
+	 * CURPOS.
+	 *
+	 * On other platforms CURPOS always requires the
+	 * CURBASE write to arm the update. Additonally
+	 * a write to any of the cursor register will cancel
+	 * an already armed cursor update. Thus leaving out
+	 * the CURBASE write after CURPOS could lead to a
+	 * cursor that doesn't appear to move, or even change
+	 * shape. Thus we always write CURBASE.
+	 *
+	 * The other registers are armed by by the CURBASE write
+	 * except when the plane is getting enabled at which time
+	 * the CURCNTR write arms the update.
+	 */
+
+	if (INTEL_GEN(dev_priv) >= 9)
+		skl_write_cursor_wm(plane, crtc_state);
+
+	if (plane->cursor.base != base ||
+	    plane->cursor.size != fbc_ctl ||
+	    plane->cursor.cntl != cntl) {
+		if (HAS_CUR_FBC(dev_priv))
+			intel_de_write_fw(dev_priv, CUR_FBC_CTL(pipe),
+					  fbc_ctl);
+		intel_de_write_fw(dev_priv, CURCNTR(pipe), cntl);
+		intel_de_write_fw(dev_priv, CURPOS(pipe), pos);
+		intel_de_write_fw(dev_priv, CURBASE(pipe), base);
+
+		plane->cursor.base = base;
+		plane->cursor.size = fbc_ctl;
+		plane->cursor.cntl = cntl;
+	} else {
+		intel_de_write_fw(dev_priv, CURPOS(pipe), pos);
+		intel_de_write_fw(dev_priv, CURBASE(pipe), base);
+	}
+
+	spin_unlock_irqrestore(&dev_priv->uncore.lock, irqflags);
+}
+
+void i9xx_disable_cursor_hw(struct intel_plane *plane,
+			    const struct intel_crtc_state *crtc_state)
+{
+	i9xx_update_cursor_hw(plane, crtc_state, NULL);
 }
 
 struct intel_plane *

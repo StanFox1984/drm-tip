@@ -5339,10 +5339,12 @@ static void skl_write_wm_level(struct drm_i915_private *dev_priv,
 	intel_de_write_fw(dev_priv, reg, val);
 }
 
-void skl_write_plane_wm(struct intel_plane *plane,
-			const struct intel_crtc_state *crtc_state)
+void skl_write_plane_wm(struct intel_atomic_state *state,
+			struct intel_plane *plane)
 {
 	struct drm_i915_private *dev_priv = to_i915(plane->base.dev);
+	struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, plane->pipe);
+	struct intel_crtc_state *crtc_state = intel_atomic_get_crtc_state(state, crtc);
 	int level, max_level = ilk_wm_max_level(dev_priv);
 	enum plane_id plane_id = plane->id;
 	enum pipe pipe = plane->pipe;

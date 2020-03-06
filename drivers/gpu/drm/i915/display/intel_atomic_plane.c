@@ -392,23 +392,47 @@ skl_next_plane_to_commit(struct intel_atomic_state *state,
 	return NULL;
 }
 
-void intel_update_plane(struct intel_plane *plane,
-			const struct intel_crtc_state *crtc_state,
-			const struct intel_plane_state *plane_state)
+void intel_update_plane(struct intel_atomic_state *state,
+			struct intel_plane *plane)
 {
-	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, plane->pipe);
 
 	trace_intel_update_plane(&plane->base, crtc);
-	plane->update_plane(plane, crtc_state, plane_state);
+	plane->update_plane(state, plane);
 }
 
-void intel_disable_plane(struct intel_plane *plane,
-			 const struct intel_crtc_state *crtc_state)
+void intel_disable_plane(struct intel_atomic_state *state,
+			 struct intel_plane *plane)
 {
-	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, plane->pipe);
 
 	trace_intel_disable_plane(&plane->base, crtc);
-	plane->disable_plane(plane, crtc_state);
+	plane->disable_plane(state, plane);
+}
+
+void intel_update_cursor_hw(struct intel_plane *plane,
+			    struct intel_crtc_state *crtc_state,
+			    struct intel_plane_state *plane_state)
+{
+	struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, plane->pipe);
+
+	trace_intel_update_plane(&plane->base, crtc);
+	if (IS_I845G(dev_priv) || IS_I865G(dev_priv))
+		i845_update_cursor_hw(plane, crtc_state, plane_state);
+	else
+		i9xx_update_cursor_hw(plane, crtc_state, plane_state);
+}
+
+void intel_disable_cursor_hw(struct intel_plane *plane,
+			     struct intel_crtc_state *crtc_state)
+{
+	struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, plane->pipe);
+
+	trace_intel_disable_plane(&plane->base, crtc);
+	if (IS_I845G(dev_priv) || IS_I865G(dev_priv))
+		i845_disable_cursor_hw(plane, crtc_state);
+	else
+		i9xx_disable_cursor_hw(plane, crtc_state);
 }
 
 void skl_update_planes_on_crtc(struct intel_atomic_state *state,
@@ -436,9 +460,9 @@ void skl_update_planes_on_crtc(struct intel_atomic_state *state,
 
 		if (new_plane_state->uapi.visible ||
 		    new_plane_state->planar_slave) {
-			intel_update_plane(plane, new_crtc_state, new_plane_state);
+			intel_update_plane(state, plane);
 		} else {
-			intel_disable_plane(plane, new_crtc_state);
+			intel_disable_plane(state, plane);
 		}
 	}
 }
@@ -459,9 +483,9 @@ void i9xx_update_planes_on_crtc(struct intel_atomic_state *state,
 			continue;
 
 		if (new_plane_state->uapi.visible)
-			intel_update_plane(plane, new_crtc_state, new_plane_state);
+			intel_update_plane(state, plane);
 		else
-			intel_disable_plane(plane, new_crtc_state);
+			intel_disable_plane(state, plane);
 	}
 }
 
