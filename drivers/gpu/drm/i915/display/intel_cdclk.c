@@ -21,10 +21,12 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#include <linux/time.h>
 #include "intel_atomic.h"
 #include "intel_cdclk.h"
 #include "intel_display_types.h"
 #include "intel_sideband.h"
+#include "intel_bw.h"
 
 /**
  * DOC: CDCLK / RAWCLK
@@ -2098,6 +2100,7 @@ static int intel_compute_min_cdclk(struct intel_cdclk_state *cdclk_state)
 	struct intel_crtc_state *crtc_state;
 	int min_cdclk, i;
 	enum pipe pipe;
+	struct intel_bw_state *bw_state;
 
 	for_each_new_intel_crtc_in_state(state, crtc, crtc_state, i) {
 		int ret;
@@ -2119,6 +2122,12 @@ static int intel_compute_min_cdclk(struct intel_cdclk_state *cdclk_state)
 	min_cdclk = cdclk_state->force_min_cdclk;
 	for_each_pipe(dev_priv, pipe)
 		min_cdclk = max(cdclk_state->min_cdclk[pipe], min_cdclk);
+
+	bw_state = intel_atomic_get_bw_state(state);
+	if (IS_ERR(bw_state))
+		return PTR_ERR(bw_state);
+
+	min_cdclk = max(bw_state->min_cdclk, min_cdclk);
 
 	return min_cdclk;
 }
