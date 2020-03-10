@@ -25,6 +25,7 @@
 #include "intel_cdclk.h"
 #include "intel_display_types.h"
 #include "intel_sideband.h"
+#include "intel_bw.h"
 
 /**
  * DOC: CDCLK / RAWCLK
@@ -2090,6 +2091,23 @@ int intel_crtc_compute_min_cdclk(const struct intel_crtc_state *crtc_state)
 	return min_cdclk;
 }
 
+static int intel_compute_dbuf_min_cdclk(struct intel_atomic_state *state)
+{
+	struct drm_i915_private *dev_priv = to_i915(state->base.dev);
+	int min_cdclk = intel_bw_calc_min_cdclk(state);
+
+	DRM_DEBUG_KMS("DBuf bw min cdclk %d\n", min_cdclk);
+
+	if (min_cdclk > dev_priv->max_cdclk_freq) {
+		drm_dbg_kms(&dev_priv->drm,
+			    "required cdclk (%d kHz) exceeds max (%d kHz)\n",
+			    min_cdclk, dev_priv->max_cdclk_freq);
+		return -EINVAL;
+	}
+
+	return min_cdclk;
+}
+
 static int intel_compute_min_cdclk(struct intel_cdclk_state *cdclk_state)
 {
 	struct intel_atomic_state *state = cdclk_state->base.state;
@@ -2098,6 +2116,13 @@ static int intel_compute_min_cdclk(struct intel_cdclk_state *cdclk_state)
 	struct intel_crtc_state *crtc_state;
 	int min_cdclk, i;
 	enum pipe pipe;
+	int dbuf_bw_min_cdclk = 0;
+
+	if (INTEL_GEN(dev_priv) >= 11) {
+		dbuf_bw_min_cdclk = intel_compute_dbuf_min_cdclk(state);
+		if (dbuf_bw_min_cdclk < 0)
+			return dbuf_bw_min_cdclk;
+	}
 
 	for_each_new_intel_crtc_in_state(state, crtc, crtc_state, i) {
 		int ret;
@@ -2105,6 +2130,8 @@ static int intel_compute_min_cdclk(struct intel_cdclk_state *cdclk_state)
 		min_cdclk = intel_crtc_compute_min_cdclk(crtc_state);
 		if (min_cdclk < 0)
 			return min_cdclk;
+
+		min_cdclk = max(min_cdclk, dbuf_bw_min_cdclk);
 
 		if (cdclk_state->min_cdclk[i] == min_cdclk)
 			continue;
