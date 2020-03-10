@@ -21,10 +21,12 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#include <linux/time.h>
 #include "intel_atomic.h"
 #include "intel_cdclk.h"
 #include "intel_display_types.h"
 #include "intel_sideband.h"
+#include "intel_bw.h"
 
 /**
  * DOC: CDCLK / RAWCLK
@@ -2090,6 +2092,23 @@ int intel_crtc_compute_min_cdclk(const struct intel_crtc_state *crtc_state)
 	return min_cdclk;
 }
 
+static int intel_compute_dbuf_min_cdclk(struct intel_atomic_state *state)
+{
+	struct drm_i915_private *dev_priv = to_i915(state->base.dev);
+	int min_cdclk = intel_bw_calc_min_cdclk(state);
+
+	DRM_DEBUG_KMS("DBuf bw min cdclk %d\n", min_cdclk);
+
+	if (min_cdclk > dev_priv->max_cdclk_freq) {
+		drm_dbg_kms(&dev_priv->drm,
+			    "required cdclk (%d kHz) exceeds max (%d kHz)\n",
+			    min_cdclk, dev_priv->max_cdclk_freq);
+		return -EINVAL;
+	}
+
+	return min_cdclk;
+}
+
 static int intel_compute_min_cdclk(struct intel_cdclk_state *cdclk_state)
 {
 	struct intel_atomic_state *state = cdclk_state->base.state;
@@ -2098,6 +2117,17 @@ static int intel_compute_min_cdclk(struct intel_cdclk_state *cdclk_state)
 	struct intel_crtc_state *crtc_state;
 	int min_cdclk, i;
 	enum pipe pipe;
+	int dbuf_bw_min_cdclk = 0;
+	bool cdclk_updated = false;
+	struct timespec64 t;
+
+	ktime_get_coarse_real_ts64(&t);
+
+	if (INTEL_GEN(dev_priv) >= 11) {
+		dbuf_bw_min_cdclk = intel_compute_dbuf_min_cdclk(state);
+		if (dbuf_bw_min_cdclk < 0)
+			return dbuf_bw_min_cdclk;
+	}
 
 	for_each_new_intel_crtc_in_state(state, crtc, crtc_state, i) {
 		int ret;
@@ -2106,15 +2136,31 @@ static int intel_compute_min_cdclk(struct intel_cdclk_state *cdclk_state)
 		if (min_cdclk < 0)
 			return min_cdclk;
 
+		min_cdclk = max(min_cdclk, dbuf_bw_min_cdclk);
+
 		if (cdclk_state->min_cdclk[i] == min_cdclk)
 			continue;
 
+		if (cdclk_state->min_cdclk[i] > min_cdclk) {
+			int current_seconds, last_seconds;
+
+			current_seconds =  (int)t.tv_sec;
+			last_seconds = (int)cdclk_state->last_updated.tv_sec;
+
+			if ((current_seconds - last_seconds) < 1800)
+				continue;
+		}
+
 		cdclk_state->min_cdclk[i] = min_cdclk;
+		cdclk_updated = true;
 
 		ret = intel_atomic_lock_global_state(&cdclk_state->base);
 		if (ret)
 			return ret;
 	}
+
+	if (cdclk_updated)
+		cdclk_state->last_updated = t;
 
 	min_cdclk = cdclk_state->force_min_cdclk;
 	for_each_pipe(dev_priv, pipe)

@@ -7,7 +7,7 @@
 #define __INTEL_CDCLK_H__
 
 #include <linux/types.h>
-
+#include <linux/time.h>
 #include "i915_drv.h"
 #include "intel_display.h"
 #include "intel_global_state.h"
@@ -53,6 +53,7 @@ struct intel_cdclk_state {
 
 	/* bitmask of active pipes */
 	u8 active_pipes;
+        struct timespec64 last_updated;
 };
 
 int intel_crtc_compute_min_cdclk(const struct intel_crtc_state *crtc_state);
