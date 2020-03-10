@@ -25,6 +25,7 @@
 #include "intel_cdclk.h"
 #include "intel_display_types.h"
 #include "intel_sideband.h"
+#include "intel_bw.h"
 
 /**
  * DOC: CDCLK / RAWCLK
@@ -1979,10 +1980,18 @@ int intel_crtc_compute_min_cdclk(const struct intel_crtc_state *crtc_state)
 {
 	struct drm_i915_private *dev_priv =
 		to_i915(crtc_state->uapi.crtc->dev);
+	struct intel_atomic_state *state = NULL;
 	int min_cdclk;
 
 	if (!crtc_state->hw.enable)
 		return 0;
+
+	/*
+	 * FIXME: Unfortunately when this gets called from intel_modeset_setup_hw_state
+	 * there is no intel_atomic_state at all. So lets not then use it.
+	 */
+	if (crtc_state->uapi.state)
+		state = to_intel_atomic_state(crtc_state->uapi.state);
 
 	min_cdclk = intel_pixel_rate_to_cdclk(crtc_state);
 
@@ -2058,6 +2067,18 @@ int intel_crtc_compute_min_cdclk(const struct intel_crtc_state *crtc_state)
 	if (IS_TIGERLAKE(dev_priv))
 		min_cdclk = max(min_cdclk, (int)crtc_state->pixel_rate);
 
+	/*
+	 * Similar story as with skl_write_plane_wm and intel_enable_sagv
+	 * - in some certain driver parts, we don't have any guarantee that
+	 * parent exists. So we might be having a crtc_state without
+	 * parent state.
+	 */
+	if (state) {
+		int dbuf_bw_cdclk = intel_bw_calc_min_cdclk(state);
+		DRM_DEBUG_KMS("DBuf bw min cdclk %d current min_cdclk %d\n", dbuf_bw_cdclk, min_cdclk);
+		min_cdclk = max(min_cdclk, dbuf_bw_cdclk);
+	}
+
 	if (min_cdclk > dev_priv->max_cdclk_freq) {
 		drm_dbg_kms(&dev_priv->drm,
 			    "required cdclk (%d kHz) exceeds max (%d kHz)\n",
@@ -2069,7 +2090,7 @@ int intel_crtc_compute_min_cdclk(const struct intel_crtc_state *crtc_state)
 }
 
 static int intel_compute_min_cdclk(struct intel_cdclk_state *cdclk_state)
-{
+{	
 	struct intel_atomic_state *state = cdclk_state->base.state;
 	struct drm_i915_private *dev_priv = to_i915(state->base.dev);
 	struct intel_crtc *crtc;

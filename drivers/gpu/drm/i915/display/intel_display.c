@@ -14542,6 +14542,14 @@ static int intel_modeset_checks(struct intel_atomic_state *state)
 			return ret;
 	}
 
+	return 0;
+}
+
+static int intel_modeset_cdclk(struct intel_atomic_state *state)
+{
+	struct drm_i915_private *dev_priv = to_i915(state->base.dev);
+	int ret;
+
 	ret = intel_modeset_calc_cdclk(state);
 	if (ret)
 		return ret;
@@ -14624,7 +14632,7 @@ static bool active_planes_affects_min_cdclk(struct drm_i915_private *dev_priv)
 	/* See {hsw,vlv,ivb}_plane_ratio() */
 	return IS_BROADWELL(dev_priv) || IS_HASWELL(dev_priv) ||
 		IS_CHERRYVIEW(dev_priv) || IS_VALLEYVIEW(dev_priv) ||
-		IS_IVYBRIDGE(dev_priv);
+		IS_IVYBRIDGE(dev_priv) || (INTEL_GEN(dev_priv) >= 11);
 }
 
 static int intel_atomic_check_planes(struct intel_atomic_state *state,
@@ -14672,6 +14680,14 @@ static int intel_atomic_check_planes(struct intel_atomic_state *state,
 
 		if (hweight8(old_active_planes) == hweight8(new_active_planes))
 			continue;
+
+		/*
+		 * active_planes bitmask has been updated, whenever amount
+		 * of active planes had changed we need to recalculate CDCLK
+		 * as it depends on total bandwidth now, not only min_cdclk
+		 * per plane.
+		 */
+		*need_cdclk_calc = true;
 
 		ret = intel_crtc_add_planes_to_state(state, crtc, new_active_planes);
 		if (ret)
@@ -14879,16 +14895,22 @@ static int intel_atomic_check(struct drm_device *dev,
 			goto fail;
 	}
 
-	ret = intel_atomic_check_crtcs(state);
-	if (ret)
-		goto fail;
-
 	intel_fbc_choose_crtc(dev_priv, state);
 	ret = calc_watermark_data(state);
 	if (ret)
 		goto fail;
 
 	ret = intel_bw_atomic_check(state);
+	if (ret)
+		goto fail;
+
+	if (any_ms) {
+		ret = intel_modeset_cdclk(state);
+		if (ret)
+			goto fail;
+	}
+
+	ret = intel_atomic_check_crtcs(state);
 	if (ret)
 		goto fail;
 

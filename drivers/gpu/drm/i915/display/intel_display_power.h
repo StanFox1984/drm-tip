@@ -311,6 +311,7 @@ intel_display_power_put_async(struct drm_i915_private *i915,
 enum dbuf_slice {
 	DBUF_S1,
 	DBUF_S2,
+	DBUF_SLICE_MAX
 };
 
 #define with_intel_display_power(i915, domain, wf) \
