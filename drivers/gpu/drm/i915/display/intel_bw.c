@@ -6,6 +6,7 @@
 #include <drm/drm_atomic_state_helper.h>
 
 #include "intel_bw.h"
+#include "intel_pm.h"
 #include "intel_display_types.h"
 #include "intel_sideband.h"
 
@@ -333,7 +334,6 @@ static unsigned int intel_bw_crtc_data_rate(const struct intel_crtc_state *crtc_
 
 	return data_rate;
 }
-
 void intel_bw_crtc_update(struct intel_bw_state *bw_state,
 			  const struct intel_crtc_state *crtc_state)
 {
@@ -385,6 +385,65 @@ intel_atomic_get_bw_state(struct intel_atomic_state *state)
 		return ERR_CAST(bw_state);
 
 	return to_intel_bw_state(bw_state);
+}
+
+int intel_bw_calc_min_cdclk(struct intel_atomic_state *state)
+{
+	struct drm_i915_private *dev_priv = to_i915(state->base.dev);
+	int i = 0;
+	enum plane_id plane_id;
+	struct intel_crtc_state *crtc_state;
+	struct intel_crtc *crtc;
+	int max_bw = 0;
+	int min_cdclk;
+	enum pipe pipe;
+	struct intel_bw_state *bw_state = NULL;
+	int slice_id = 0;
+
+	bw_state = intel_atomic_get_bw_state(state);
+
+	if (IS_ERR(bw_state))
+		return PTR_ERR(bw_state);
+
+	for_each_new_intel_crtc_in_state(state, crtc, crtc_state, i) {
+		struct intel_crtc_bw *crtc_bw = &bw_state->dbuf_bw_used[crtc->pipe];
+
+		memset(&crtc_bw->dbuf_bw, 0, sizeof(crtc_bw->dbuf_bw));
+
+		for_each_plane_id_on_crtc(crtc, plane_id) {
+			struct skl_ddb_entry *plane_alloc =
+				&crtc_state->wm.skl.plane_ddb_y[plane_id];
+			struct skl_ddb_entry *uv_plane_alloc =
+				&crtc_state->wm.skl.plane_ddb_uv[plane_id];
+			unsigned int data_rate = crtc_state->data_rate[plane_id];
+
+			unsigned int dbuf_mask = skl_ddb_dbuf_slice_mask(dev_priv, plane_alloc);
+
+			dbuf_mask |= skl_ddb_dbuf_slice_mask(dev_priv, uv_plane_alloc);
+
+			DRM_DEBUG_KMS("Got dbuf mask %x for pipe %c ddb %d-%d plane %d data rate %d\n",
+				      dbuf_mask, pipe_name(crtc->pipe), plane_alloc->start,
+				      plane_alloc->end, plane_id, data_rate);
+
+			for_each_dbuf_slice_in_mask(slice_id, dbuf_mask)
+				crtc_bw->dbuf_bw[slice_id] += data_rate;
+		}
+	}
+
+	for_each_dbuf_slice(slice_id) {
+		int total_bw_per_slice = 0;
+
+		for_each_pipe(dev_priv, pipe) {
+			struct intel_crtc_bw *crtc_bw = &bw_state->dbuf_bw_used[pipe];
+
+			total_bw_per_slice += crtc_bw->dbuf_bw[slice_id];
+		}
+		max_bw = max(max_bw, total_bw_per_slice);
+	}
+
+	min_cdclk = max_bw / 64;
+
+	return min_cdclk;
 }
 
 int intel_bw_atomic_check(struct intel_atomic_state *state)

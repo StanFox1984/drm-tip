@@ -14675,6 +14675,14 @@ static int intel_atomic_check_planes(struct intel_atomic_state *state,
 		if (old_active_planes == new_active_planes)
 			continue;
 
+		/*
+		 * active_planes bitmask has been updated, whenever amount
+		 * of active planes had changed we need to recalculate CDCLK
+		 * as it depends on total bandwidth now, not only min_cdclk
+		 * per plane.
+		 */
+		*need_cdclk_calc = true;
+
 		ret = intel_crtc_add_planes_to_state(state, crtc, new_active_planes);
 		if (ret)
 			return ret;
