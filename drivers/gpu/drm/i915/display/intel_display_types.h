@@ -672,6 +672,12 @@ struct skl_plane_wm {
 	bool is_planar;
 };
 
+enum color_plane
+{
+	COLOR_PLANE_Y,
+	COLOR_PLANE_UV
+};
+
 struct skl_pipe_wm {
 	struct skl_plane_wm planes[I915_MAX_PLANES];
 };
