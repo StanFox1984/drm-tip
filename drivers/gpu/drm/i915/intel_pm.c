@@ -3757,41 +3757,24 @@ intel_disable_sagv(struct drm_i915_private *dev_priv)
 	return 0;
 }
 
-bool intel_can_enable_sagv(struct intel_atomic_state *state)
+static bool icl_can_enable_sagv_on_pipe(struct intel_crtc_state *crtc_state)
 {
-	struct drm_device *dev = state->base.dev;
+	struct drm_device *dev = crtc_state->uapi.crtc->dev;
 	struct drm_i915_private *dev_priv = to_i915(dev);
 	struct intel_crtc *crtc;
 	struct intel_plane *plane;
-	struct intel_crtc_state *crtc_state;
-	enum pipe pipe;
+	struct intel_plane_state *plane_state;
 	int level, latency;
 
-	if (!intel_has_sagv(dev_priv))
+	crtc = to_intel_crtc(crtc_state->uapi.crtc);
+
+	if (crtc_state->hw.adjusted_mode.flags & DRM_MODE_FLAG_INTERLACE) {
+		DRM_DEBUG_KMS("No SAGV for interlaced mode on pipe %c\n",
+			      pipe_name(crtc->pipe));
 		return false;
+	}
 
-	/*
-	 * If there are no active CRTCs, no additional checks need be performed
-	 */
-	if (hweight8(state->active_pipes) == 0)
-		return true;
-
-	/*
-	 * SKL+ workaround: bspec recommends we disable SAGV when we have
-	 * more then one pipe enabled
-	 */
-	if (hweight8(state->active_pipes) > 1)
-		return false;
-
-	/* Since we're now guaranteed to only have one active CRTC... */
-	pipe = ffs(state->active_pipes) - 1;
-	crtc = intel_get_crtc_for_pipe(dev_priv, pipe);
-	crtc_state = to_intel_crtc_state(crtc->base.state);
-
-	if (crtc_state->hw.adjusted_mode.flags & DRM_MODE_FLAG_INTERLACE)
-		return false;
-
-	for_each_intel_plane_on_crtc(dev, crtc, plane) {
+	intel_atomic_crtc_state_for_each_plane_state(plane, plane_state, crtc_state) {
 		struct skl_plane_wm *wm =
 			&crtc_state->wm.skl.optimal.planes[plane->id];
 
@@ -3807,7 +3790,7 @@ bool intel_can_enable_sagv(struct intel_atomic_state *state)
 		latency = dev_priv->wm.skl_latency[level];
 
 		if (skl_needs_memory_bw_wa(dev_priv) &&
-		    plane->base.state->fb->modifier ==
+		    plane_state->uapi.fb->modifier ==
 		    I915_FORMAT_MOD_X_TILED)
 			latency += 15;
 
@@ -3816,8 +3799,58 @@ bool intel_can_enable_sagv(struct intel_atomic_state *state)
 		 * incur memory latencies higher than sagv_block_time_us we
 		 * can't enable SAGV.
 		 */
-		if (latency < dev_priv->sagv_block_time_us)
+		if (latency < dev_priv->sagv_block_time_us) {
+			DRM_DEBUG_KMS("Latency %d < sagv block time %d, no SAGV for pipe %c\n",
+				      latency, dev_priv->sagv_block_time_us, pipe_name(crtc->pipe));
 			return false;
+		}
+	}
+
+	return true;
+}
+
+static bool skl_can_enable_sagv_on_pipe(struct intel_crtc_state *crtc_state)
+{
+	struct intel_atomic_state *state = to_intel_atomic_state(crtc_state->uapi.state);
+
+	/*
+	 * It has been recommended that for Gen 9 we switch SAGV off when
+	 * multiple pipes are used.
+	 */
+	if (hweight8(state->active_pipes) > 1)
+		return false;
+
+	/*
+	 * Besides active pipe limitation, rest of checks pretty much match ICL
+	 * so no need to duplicate code
+	 */
+	return icl_can_enable_sagv_on_pipe(crtc_state);
+}
+
+bool intel_can_enable_sagv(struct intel_atomic_state *state)
+{
+	struct drm_device *dev = state->base.dev;
+	struct drm_i915_private *dev_priv = to_i915(dev);
+	struct intel_crtc *crtc;
+	struct intel_crtc_state *crtc_state;
+	int i;
+
+	if (!intel_has_sagv(dev_priv))
+		return false;
+
+	/*
+	 * If there are no active CRTCs, no additional checks need be performed
+	 */
+	if (hweight8(state->active_pipes) == 0)
+		return true;
+
+	for_each_new_intel_crtc_in_state(state, crtc, crtc_state, i) {
+		if (INTEL_GEN(dev_priv) <= 9) {
+			if (!skl_can_enable_sagv_on_pipe(crtc_state))
+				return false;
+		} else if (!icl_can_enable_sagv_on_pipe(crtc_state)) {
+			return false;
+		}
 	}
 
 	return true;
