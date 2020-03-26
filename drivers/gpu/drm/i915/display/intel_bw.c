@@ -395,7 +395,7 @@ intel_atomic_get_new_bw_state(struct intel_atomic_state *state)
 
 	bw_state = intel_atomic_get_new_global_obj_state(state, &dev_priv->bw_obj);
 
-	if (!bw_state))
+	if (!bw_state)
 		return NULL;
 
 	return to_intel_bw_state(bw_state);
