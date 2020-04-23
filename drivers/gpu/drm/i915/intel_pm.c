@@ -3874,6 +3874,7 @@ static int intel_compute_sagv_mask(struct intel_atomic_state *state)
 	struct intel_bw_state *new_bw_state = NULL;
 	const struct intel_bw_state *old_bw_state = NULL;
 	int i;
+	bool active_pipes_calculated = false;
 
 	for_each_new_intel_crtc_in_state(state, crtc,
 					 new_crtc_state, i) {
@@ -3882,6 +3883,12 @@ static int intel_compute_sagv_mask(struct intel_atomic_state *state)
 			return PTR_ERR(new_bw_state);
 
 		old_bw_state = intel_atomic_get_old_bw_state(state);
+
+		if (!active_pipes_calculated) {
+			state->active_pipes = new_bw_state->active_pipes =
+				intel_calc_active_pipes(state, old_bw_state->active_pipes);
+			active_pipes_calculated = true;
+		}
 
 		if (intel_crtc_can_enable_sagv(new_crtc_state))
 			new_bw_state->pipe_sagv_reject &= ~BIT(crtc->pipe);
@@ -5911,11 +5918,9 @@ skl_compute_wm(struct intel_atomic_state *state)
 	if (ret)
 		return ret;
 
-	if (state->modeset) {
-		ret = intel_compute_sagv_mask(state);
-		if (ret)
-			return ret;
-	}
+	ret = intel_compute_sagv_mask(state);
+	if (ret)
+		return ret;
 
 	/*
 	 * skl_compute_ddb() will have adjusted the final watermarks
