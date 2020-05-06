@@ -3855,8 +3855,11 @@ static bool skl_crtc_can_enable_sagv(const struct intel_crtc_state *crtc_state)
 
 bool intel_can_enable_sagv(const struct intel_bw_state *bw_state)
 {
-	if (bw_state->active_pipes && !is_power_of_2(bw_state->active_pipes))
-		return false;
+	struct drm_i915_private *dev_priv = to_i915(bw_state->base.state->base.dev);
+
+	if (INTEL_GEN(dev_priv) < 11)
+		if (bw_state->active_pipes && !is_power_of_2(bw_state->active_pipes))
+			return false;
 
 	return bw_state->pipe_sagv_reject == 0;
 }
