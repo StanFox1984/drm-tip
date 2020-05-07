@@ -157,11 +157,6 @@ struct intel_engine_execlists {
 	struct i915_priolist default_priolist;
 
 	/**
-	 * @ccid: identifier for contexts submitted to this engine
-	 */
-	u32 ccid;
-
-	/**
 	 * @yield: CCID at the time of the last semaphore-wait interrupt.
 	 *
 	 * Instead of leaving a semaphore busy-spinning on an engine, we would
@@ -320,6 +315,9 @@ struct intel_engine_cs {
 		struct list_head requests;
 		struct list_head hold; /* ready requests, but on hold */
 	} active;
+
+	/* keep a request in reserve for a [pm] barrier under oom */
+	struct i915_request *request_pool;
 
 	struct llist_head barrier_tasks;
 
