@@ -5342,7 +5342,7 @@ static void skl_compute_plane_wm(const struct intel_crtc_state *crtc_state,
 	if (!skl_wm_has_lines(dev_priv, level))
 		res_lines = 0;
 
-	if (res_lines > 31) {
+	if (res_lines > 31 || level > 0) {
 		/* reject it */
 		result->min_ddb_alloc = U16_MAX;
 		return;
